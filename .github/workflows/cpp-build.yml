@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 5
+# WORKFLOW VERSION: 6
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -10,22 +10,18 @@
 # == Logic and Execution Steps (Validated up to this version) ==
 #
 # 1.  **Checkout & Structure (Steps 1-4):** All source codes are checked out, with Opus's source
-#     placed inside PJSIP's `third_party` directory. PJSIP is moved to the workspace root.
+#     placed inside PJSIP's `third_party/opus` directory. PJSIP is moved to the workspace root.
 # 2.  **Configuration (Step 5):** The mandatory `pjlib/include/pj/config_site.h` is created.
 #
 # == Objective of This Version ==
 #
-# 3.  **Fix Header Inconsistency (Step 6):** The previous copy command failed. This version uses
-#     a simpler, more direct command to copy only the header files (*.h) from
-#     `third_party/opus/include/` to `third_party/opus/`, ensuring they exist in both required
-#     locations without causing a recursive copy error.
+# 3.  **Patch PJSIP Project File (Step 6):** Previous attempts to fix header paths by copying files
+#     failed. This version takes a surgical approach: it directly modifies the inconsistent
+#     `pjmedia-codec.vcxproj` file, adding the correct include path for the Opus headers.
 #
-# 4.  **Unified PJSIP Build (Step 8):** With all sources and headers correctly placed, this step
-#     attempts to build the entire PJSIP solution. PJSIP is now expected to successfully build itself
-#     AND its included Opus dependency without errors.
-#
-# 5.  **Final Linkage (Steps 9 & 11):** The resulting `.lib` files are copied to the locations
-#     expected by the `microsip.vcxproj` file before the final build is triggered.
+# 4.  **Unified PJSIP Build (Step 8):** With the project file patched, this step should now
+#     build the entire PJSIP solution cleanly, including Opus and all its dependencies. The
+#     `continue-on-error` flag is removed as a full success is expected.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -87,11 +83,32 @@ jobs:
         "@
         Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
 
-    - name: 6. Fix PJSIP Header Inconsistency for Opus
+    - name: 6. Patch pjmedia-codec.vcxproj to add Opus include path
       shell: pwsh
       run: |
-        echo "Copying Opus headers to satisfy both pjmedia-codec and libopus projects..."
-        Copy-Item -Path third_party/opus/include/*.h -Destination third_party/opus/ -Force
+        $projFile = "pjmedia/build/pjmedia_codec.vcxproj"
+        echo "Loading project file: $projFile"
+        $xml = [xml](Get-Content $projFile)
+        
+        # Define the XML namespace
+        $ns = @{msb = "http://schemas.microsoft.com/developer/msbuild/2003"}
+        
+        # Find the specific ItemDefinitionGroup for Release|Win32
+        $itemDefGroup = $xml.Project.ItemDefinitionGroup | Where-Object { $_.Condition -eq "'$(Configuration)|$(Platform)'=='Release|Win32'" }
+        
+        if ($itemDefGroup) {
+            $includeDirsNode = $itemDefGroup.ClCompile.AdditionalIncludeDirectories
+            $currentIncludes = $includeDirsNode.'#text'
+            $newIncludes = $currentIncludes + ";../../third_party/opus/include"
+            $includeDirsNode.'#text' = $newIncludes
+            echo "Successfully patched include path. New path is: $newIncludes"
+        } else {
+            echo "ERROR: Could not find 'Release|Win32' configuration in $projFile"
+            exit 1
+        }
+        
+        $xml.Save($projFile)
+        echo "Saved updated project file: $projFile"
         
     - name: 7. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
