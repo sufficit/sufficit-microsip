@@ -88,7 +88,10 @@ jobs:
         Write-Host "Loading project file to patch: \$projFile"
         \$xml = [xml](Get-Content \$projFile)
         
-        \$targetCondition = "'`$(Configuration)`|`$(Platform)'=='Release|Win32'"
+        # Using a literal Here-String to define the target condition to avoid YAML parsing issues.
+        \$targetCondition = @'
+'$(Configuration)|$(Platform)'=='Release|Win32'
+'@
         \$patched = \$false
         
         foreach (\$group in \$xml.Project.ItemDefinitionGroup) {
@@ -128,33 +131,33 @@ jobs:
     - name: 9. Build Entire PJSIP Solution
       shell: pwsh
       run: |
-        echo "Building the entire PJSIP solution (pjproject-vs14.sln)..."
+        echo "Building the entire PJSIP solution..."
         msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
 
     - name: 10. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Preparing all required libraries for MicroSIP ---"
-        \$microsip_lib_dir = "sufficit-microsip/lib"
-        \$microsip_opus_dir = "sufficit-microsip/third_party/opus/Win32"
-        New-Item -ItemType Directory -Force -Path \$microsip_lib_dir
-        New-Item -ItemType Directory -Force -Path \$microsip_opus_dir
+        $microsip_lib_dir = "sufficit-microsip/lib"
+        $microsip_opus_dir = "sufficit-microsip/third_party/opus/Win32"
+        New-Item -ItemType Directory -Force -Path $microsip_lib_dir
+        New-Item -ItemType Directory -Force -Path $microsip_opus_dir
         
-        \$opus_source_file = Get-Item "third_party/lib/libopus-*.lib"
-        Copy-Item -Path \$opus_source_file.FullName -Destination "\$microsip_opus_dir/opus.lib" -Force
-        echo "Copied \$(\$opus_source_file.Name) to \$microsip_opus_dir/opus.lib"
+        $opus_source_file = Get-Item "third_party/lib/libopus-*.lib"
+        Copy-Item -Path $opus_source_file.FullName -Destination "$microsip_opus_dir/opus.lib" -Force
+        echo "Copied $($opus_source_file.Name) to $microsip_opus_dir/opus.lib"
 
-        \$pjlib_source = Get-Item "lib/libpjproject-i386-Win32-vc14-Release.lib"
-        \$pjlib_dest_renamed = "\$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
-        Copy-Item -Path \$pjlib_source.FullName -Destination \$pjlib_dest_renamed -Force
-        echo "Copied and Renamed \$(\$pjlib_source.Name) to \$pjlib_dest_renamed"
+        $pjlib_source = Get-Item "lib/libpjproject-i386-Win32-vc14-Release.lib"
+        $pjlib_dest_renamed = "$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
+        Copy-Item -Path $pjlib_source.FullName -Destination $pjlib_dest_renamed -Force
+        echo "Copied and Renamed $($pjlib_source.Name) to $pjlib_dest_renamed"
 
     - name: 11. Generate Version Tag
       id: generate_version
       working-directory: ./sufficit-microsip
       run: |
-        \$VERSION="v\$(Get-Date -Format 'yyyy.MM.dd').\${{ github.run_number }}"
-        echo "VERSION=\$VERSION" | Out-File -FilePath \$env:GITHUB_OUTPUT -Append
+        $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
+        echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       
     - name: 12. Build the final project
       working-directory: ./sufficit-microsip
@@ -181,8 +184,8 @@ jobs:
     - name: 2. Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: \${{ needs.build.outputs.version }}
-        name: "Release \${{ needs.build.outputs.version }}"
+        tag_name: ${{ needs.build.outputs.version }}
+        name: "Release ${{ needs.build.outputs.version }}"
         body: |
           Versão compilada automaticamente a partir do último push para a branch main.
         files: microsip.exe
