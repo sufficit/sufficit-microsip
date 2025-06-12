@@ -28,7 +28,6 @@ jobs:
         Move-Item -Path ${{ github.workspace }}\pjproject\* -Destination ${{ github.workspace }}\
         Remove-Item -Path ${{ github.workspace }}\pjproject -Recurse -Force
 
-    # ===================== PASSO NOVO E FINAL =====================
     - name: 4. Create PJSIP config_site.h
       shell: pwsh
       run: |
@@ -47,9 +46,9 @@ jobs:
         #define PJMEDIA_VIDEO_DEV_HAS_SDL 0
         #define PJMEDIA_VIDEO_DEV_HAS_DSHOW 0
         #define PJ_LOG_MAX_LEVEL 3
+        #define PJMEDIA_AUD_MAX_DEVS 64
         "@
         Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
-    # =============================================================
 
     - name: 5. Generate Version Tag
       id: generate_version
