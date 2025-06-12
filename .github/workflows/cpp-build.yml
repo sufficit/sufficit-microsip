@@ -6,10 +6,7 @@ on:
 
 jobs:
   build:
-    # Este trabalho executa em Windows para compilar o projeto
     runs-on: windows-latest
-    
-    # Define uma "saída" para que o número da versão possa ser usado por outros trabalhos
     outputs:
       version: ${{ steps.generate_version.outputs.VERSION }}
 
@@ -20,39 +17,35 @@ jobs:
     - name: 2. Generate Version Tag
       id: generate_version
       run: |
-        # Gera uma tag no formato v<ano>.<mes>.<dia>.<numero_do_build> e a expõe para outros trabalhos
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
     - name: 3. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    # ===================== PASSO ADICIONADO =====================
-    # Tenta instalar o Windows SDK 8.1 que está faltando.
-    # ATENÇÃO: Isso pode aumentar o tempo de build consideravelmente.
+    # ===================== PASSO DE CORREÇÃO 1 =====================
     - name: 4. Install missing Windows SDK 8.1
       run: choco install windows-sdk-8.1 -y --force
-    # ==========================================================
+
+    # ===================== PASSO DE CORREÇÃO 2 (NOVO) =====================
+    # Instala as ferramentas de build do VS 2015 (v140) que estão faltando.
+    - name: 5. Install missing VS 2015 (v140) Build Tools
+      run: |
+        & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise" --add Microsoft.VisualStudio.Component.VC.v140 --quiet --wait --norestart
+    # ===================================================================
       
-    - name: 5. Build the project
+    - name: 6. Build the project
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 6. Upload build artifact
+    - name: 7. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
-        # O caminho para o executável gerado.
-        # Verifique se este é o caminho correto após a compilação.
         path: Release/microsip.exe
 
   release:
-    # Este trabalho só executa após o 'build' ser concluído com sucesso
     needs: build
-    
-    # Pode executar em Ubuntu, que é mais rápido e barato para tarefas que não são de build
     runs-on: ubuntu-latest
-    
-    # Permissão necessária para criar uma Release
     permissions:
       contents: write
 
@@ -65,10 +58,8 @@ jobs:
     - name: 2. Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        # Usa a versão gerada no trabalho de build
         tag_name: ${{ needs.build.outputs.version }}
         name: "Release ${{ needs.build.outputs.version }}"
         body: |
           Versão compilada automaticamente a partir do último push para a branch main.
-        # Lista dos arquivos a serem anexados na Release
         files: microsip.exe
