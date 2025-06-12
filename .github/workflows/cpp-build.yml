@@ -7,12 +7,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    
-    # Define o diretório de trabalho padrão para os passos de run:
-    defaults:
-      run:
-        working-directory: sufficit-microsip
-
     outputs:
       version: ${{ steps.generate_version.outputs.VERSION }}
 
@@ -20,36 +14,42 @@ jobs:
     - name: 1. Checkout MicroSip Repository
       uses: actions/checkout@v4
       with:
-        # Baixa seu projeto para uma pasta específica
         path: sufficit-microsip
 
-    # ===================== PASSO NOVO E CRUCIAL =====================
     - name: 2. Clone PJSIP Repository
       uses: actions/checkout@v4
       with:
-        # Clona o repositório oficial da PJSIP
         repository: pjsip/pjproject
-        # Para uma pasta chamada 'pjproject' ao lado da sua
         path: pjproject
-    # ==============================================================
 
-    - name: 3. Generate Version Tag
+    # ===================== PASSO FINAL DE CORREÇÃO =====================
+    - name: 3. Restructure PJSIP directories for build
+      shell: pwsh
+      run: |
+        # Move o conteúdo da pasta 'pjproject' para a raiz do workspace
+        Move-Item -Path ${{ github.workspace }}\pjproject\* -Destination ${{ github.workspace }}\
+        # Remove a pasta 'pjproject' que agora está vazia
+        Remove-Item -Path ${{ github.workspace }}\pjproject -Recurse
+    # =================================================================
+
+    - name: 4. Generate Version Tag
       id: generate_version
+      working-directory: ./sufficit-microsip
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-    - name: 4. Add MSBuild to path
+    - name: 5. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
       
-    - name: 5. Build the project
+    - name: 6. Build the project
+      working-directory: ./sufficit-microsip
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 6. Upload build artifact
+    - name: 7. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
-        # O caminho do artefato precisa ser ajustado pois estamos em um subdiretório
         path: sufficit-microsip/Release/microsip.exe
 
   release:
