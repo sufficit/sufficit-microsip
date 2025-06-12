@@ -1,6 +1,6 @@
 # Este script corrige o arquivo de projeto da PJSIP que possui um caminho de inclusão quebrado para o Opus.
 
-$projFile = "../pjmedia/build/pjmedia-codec.vcxproj"
+$projFile = "pjmedia/build/pjmedia-codec.vcxproj"
 Write-Host "Loading project file to patch: $projFile"
 
 # Carrega o conteúdo do arquivo XML
