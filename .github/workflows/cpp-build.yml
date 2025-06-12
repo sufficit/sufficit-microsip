@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 6
+# WORKFLOW VERSION: 7
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -10,18 +10,17 @@
 # == Logic and Execution Steps (Validated up to this version) ==
 #
 # 1.  **Checkout & Structure (Steps 1-4):** All source codes are checked out, with Opus's source
-#     placed inside PJSIP's `third_party/opus` directory. PJSIP is moved to the workspace root.
+#     placed inside PJSIP's `third_party` directory. PJSIP is moved to the workspace root.
 # 2.  **Configuration (Step 5):** The mandatory `pjlib/include/pj/config_site.h` is created.
 #
 # == Objective of This Version ==
 #
-# 3.  **Patch PJSIP Project File (Step 6):** Previous attempts to fix header paths by copying files
-#     failed. This version takes a surgical approach: it directly modifies the inconsistent
-#     `pjmedia-codec.vcxproj` file, adding the correct include path for the Opus headers.
+# 3.  **Patch PJSIP Project File (Step 6):** The PowerShell script in v6 failed due to a syntax
+#     error. This version corrects the script by properly escaping special characters (`$`),
+#     ensuring the `.vcxproj` file is successfully modified to include the correct Opus header path.
 #
-# 4.  **Unified PJSIP Build (Step 8):** With the project file patched, this step should now
-#     build the entire PJSIP solution cleanly, including Opus and all its dependencies. The
-#     `continue-on-error` flag is removed as a full success is expected.
+# 4.  **Unified PJSIP Build (Step 8):** With the project file successfully patched, this step
+#     will build the entire PJSIP solution. A full success is now expected.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -64,37 +63,35 @@ jobs:
     - name: 5. Create PJSIP config_site.h
       shell: pwsh
       run: |
-        $config = @"
-        #define PJ_WIN32 1
-        #include <windows.h>
-        #define PJ_HAS_IPV6 1
-        #define PJSUA_MAX_ACC 10
-        #define PJSUA_MAX_CALLS 32
-        #define PJMEDIA_HAS_G729_CODEC 1
-        #define PJMEDIA_HAS_ILBC_CODEC 1
-        #define PJMEDIA_HAS_SPEEX_CODEC 1
-        #define PJMEDIA_HAS_SPEEX_AEC 1
-        #define PJMEDIA_HAS_OPUS_CODEC 1
-        #define PJMEDIA_HAS_VIDEO 0
-        #define PJMEDIA_VIDEO_DEV_HAS_SDL 0
-        #define PJMEDIA_VIDEO_DEV_HAS_DSHOW 0
-        #define PJ_LOG_MAX_LEVEL 3
-        #define PJMEDIA_AUD_MAX_DEVS 64
-        "@
-        Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
+        <span class="math-inline">config \= @"
+\#define PJ\_WIN32 1
+\#include <windows\.h\>
+\#define PJ\_HAS\_IPV6 1
+\#define PJSUA\_MAX\_ACC 10
+\#define PJSUA\_MAX\_CALLS 32
+\#define PJMEDIA\_HAS\_G729\_CODEC 1
+\#define PJMEDIA\_HAS\_ILBC\_CODEC 1
+\#define PJMEDIA\_HAS\_SPEEX\_CODEC 1
+\#define PJMEDIA\_HAS\_SPEEX\_AEC 1
+\#define PJMEDIA\_HAS\_OPUS\_CODEC 1
+\#define PJMEDIA\_HAS\_VIDEO 0
+\#define PJMEDIA\_VIDEO\_DEV\_HAS\_SDL 0
+\#define PJMEDIA\_VIDEO\_DEV\_HAS\_DSHOW 0
+\#define PJ\_LOG\_MAX\_LEVEL 3
+\#define PJMEDIA\_AUD\_MAX\_DEVS 64
+"@
+Set\-Content \-Path "</span>{{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
 
     - name: 6. Patch pjmedia-codec.vcxproj to add Opus include path
       shell: pwsh
       run: |
         $projFile = "pjmedia/build/pjmedia_codec.vcxproj"
         echo "Loading project file: $projFile"
-        $xml = [xml](Get-Content $projFile)
+        $xml = [xml](Get-Content <span class="math-inline">projFile\)
+\# In PowerShell double\-quoted strings, the '</span>' character must be escaped with a backtick (`) to be treated literally.
+        $conditionString = "'`$(Configuration)`|`$(Platform)'=='Release|Win32'"
         
-        # Define the XML namespace
-        $ns = @{msb = "http://schemas.microsoft.com/developer/msbuild/2003"}
-        
-        # Find the specific ItemDefinitionGroup for Release|Win32
-        $itemDefGroup = $xml.Project.ItemDefinitionGroup | Where-Object { $_.Condition -eq "'$(Configuration)|$(Platform)'=='Release|Win32'" }
+        $itemDefGroup = $xml.Project.ItemDefinitionGroup | Where-Object { $_.Condition -eq $conditionString }
         
         if ($itemDefGroup) {
             $includeDirsNode = $itemDefGroup.ClCompile.AdditionalIncludeDirectories
@@ -139,7 +136,7 @@ jobs:
       id: generate_version
       working-directory: ./sufficit-microsip
       run: |
-        $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
+        <span class="math-inline">VERSION\="v</span>(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       
     - name: 11. Build the final project
