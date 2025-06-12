@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 14 (Verification & Final Attempt)
+# WORKFLOW VERSION: 14 (Final - Patching Strategy)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -9,22 +9,26 @@
 #
 # == Logic and Execution Steps (Final Reviewed Version) ==
 #
-# This workflow abandons all previous complex approaches and focuses on a simple, verifiable
-# sequence to resolve the final build error.
+# This workflow returns to the most direct strategy: patching the broken PJSIP project file
+# before compilation, using a syntactically robust script to avoid all previous YAML/shell errors.
 #
-# 1.  **Setup (Steps 1-7):** All sources are checked out, PJSIP is moved to the root, the
-#     config_site.h is created, and Opus is built independently via CMake. This foundation is solid.
+# 1.  **Setup (Steps 1-4):** All sources are checked out, with Opus placed directly inside PJSIP's
+#     third_party directory as the PJSIP solution expects.
 #
-# 2.  **Pre-position Dependencies (Step 8):** This step copies the Opus headers and library to the
-#     locations where we believe PJSIP expects them.
+# 2.  **Configuration (Step 5):** The mandatory `config_site.h` is created with all necessary defines,
+#     including the Opus bitrate which was previously missing.
 #
-# 3.  **DEBUG & VERIFY (Step 9):** THIS IS THE CRITICAL NEW STEP. To eliminate any guesswork,
-#     this step explicitly lists the contents of the `third_party` directory and confirms the
-#     existence of `opus.h` at its expected location. If the file is not there, the build will
-#     fail immediately, telling us the copy in Step 8 is the problem.
+# 3.  **Patch PJSIP Project (Step 6):** THIS IS THE CRITICAL FIX. A robust PowerShell script
+#     programmatically edits the `pjmedia-codec.vcxproj` file. It adds the correct include path
+#     to the Opus headers (`../../third_party/opus/include`), resolving the `C1083: Cannot open
+#     include file` error at its root.
 #
-# 4.  **Build & Finalize (Steps 10-14):** The PJSIP build will only run if the verification in
-#     Step 9 passes. The final steps then copy the generated libs and build the main project.
+# 4.  **Unified Build (Step 8):** A single `msbuild` command on the solution file. Because of the
+#     patch, this command is now expected to succeed completely, without errors and without
+#     needing `continue-on-error`.
+#
+# 5.  **Finalize (Steps 9-13):** With all libraries correctly built by PJSIP, the final steps
+#     copy the required artifacts for the `microsip.vcxproj` build, which is now expected to succeed.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -52,11 +56,11 @@ jobs:
         repository: pjsip/pjproject
         path: pjproject
     
-    - name: 3. Clone Opus Repository
+    - name: 3. Clone Opus into PJSIP third_party
       uses: actions/checkout@v4
       with:
         repository: xiph/opus
-        path: opus-source
+        path: pjproject/third_party/opus
 
     - name: 4. Restructure PJSIP directories
       shell: pwsh
@@ -68,113 +72,92 @@ jobs:
       shell: pwsh
       run: |
         $config = @"
-        #define PJ_WIN32 1
-        #include <windows.h>
-        #define PJ_HAS_IPV6 1
-        #define PJSUA_MAX_ACC 10
-        #define PJSUA_MAX_CALLS 32
-        #define PJMEDIA_HAS_G729_CODEC 1
-        #define PJMEDIA_HAS_ILBC_CODEC 1
-        #define PJMEDIA_HAS_SPEEX_CODEC 1
-        #define PJMEDIA_HAS_SPEEX_AEC 1
-        #define PJMEDIA_HAS_OPUS_CODEC 1
-        #define PJMEDIA_HAS_VIDEO 0
-        #define PJMEDIA_VIDEO_DEV_HAS_SDL 0
-        #define PJMEDIA_VIDEO_DEV_HAS_DSHOW 0
-        #define PJ_LOG_MAX_LEVEL 3
-        #define PJMEDIA_AUD_MAX_DEVS 64
-        "@
+#define PJ_WIN32 1
+#include <windows.h>
+#define PJ_HAS_IPV6 1
+#define PJMEDIA_HAS_OPUS_CODEC 1
+#define PJMEDIA_OPUS_DEFAULT_BIT_RATE 32000
+#define PJ_LOG_MAX_LEVEL 4
+"@
         Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
+        echo "Created pjlib/include/pj/config_site.h with Opus enabled."
 
-    - name: 6. Add MSBuild to path
+    - name: 6. Patch pjmedia-codec.vcxproj to add Opus include path
+      shell: pwsh
+      run: |
+        $projFile = "pjmedia/build/pjmedia_codec.vcxproj"
+        echo "Loading project file to patch: $projFile"
+        $xml = [xml](Get-Content $projFile)
+        
+        # This literal here-string is the only 100% safe way to define this string in YAML/PowerShell
+        $targetCondition = @'
+'$(Configuration)|$(Platform)'=='Release|Win32'
+'@
+        $patched = $false
+        
+        # Loop through all configuration groups in the project file
+        foreach ($group in $xml.Project.ItemDefinitionGroup) {
+            if ($group.Condition -eq $targetCondition) {
+                echo "Found 'Release|Win32' configuration. Patching..."
+                $includeDirsNode = $group.ClCompile.AdditionalIncludeDirectories
+                $currentIncludes = $includeDirsNode.'#text'
+                $newIncludes = $currentIncludes + ";../../third_party/opus/include"
+                $includeDirsNode.'#text' = $newIncludes
+                echo "Successfully patched include path. New path is: $newIncludes"
+                $patched = $true
+                break
+            }
+        }
+        
+        if (-not $patched) {
+            echo "FATAL: Could not find 'Release|Win32' configuration in $projFile to patch."
+            exit 1
+        }
+        
+        $xml.Save($projFile)
+        echo "Saved updated project file: $projFile"
+        
+    - name: 7. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 7. Build Opus Library (Independent)
+    - name: 8. Build Entire PJSIP Solution
       shell: pwsh
       run: |
-        echo "Building Opus with CMake..."
-        cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
-        cmake --build opus-build --config Release
-
-    - name: 8. Prepare Opus Artifacts for PJSIP
-      shell: pwsh
-      run: |
-        echo "Placing Opus headers and libraries for PJSIP build..."
-        # PJSIP expects to find #include <opus/opus.h> relative to its `third_party` directory.
-        # This means we need a structure like: third_party/opus/opus.h
-        $opusHeaderDest = "third_party/opus"
-        New-Item -ItemType Directory -Force -Path $opusHeaderDest
-        Copy-Item -Path opus-source/include/*.h -Destination $opusHeaderDest -Force
-        
-        # PJSIP's sample apps link against libopus.a
-        $pjThirdPartyLibDir = "third_party/lib"
-        New-Item -ItemType Directory -Force -Path $pjThirdPartyLibDir
-        Copy-Item -Path "opus-build/Release/opus.lib" -Destination "$pjThirdPartyLibDir/libopus.a" -Force
-
-    - name: 9. DEBUG - Verify File Structure
-      shell: pwsh
-      run: |
-        echo "--- Verifying file structure before PJSIP build ---"
-        $opusHeaderPath = "third_party/opus/opus.h"
-        $opusLibPath = "third_party/lib/libopus.a"
-        
-        echo "Listing contents of third_party directory:"
-        Get-ChildItem -Path "third_party" -Recurse
-        
-        echo "--- Checking for critical files ---"
-        if (Test-Path $opusHeaderPath) {
-          echo "SUCCESS: Found Opus header at $opusHeaderPath"
-        } else {
-          echo "FATAL: Opus header NOT FOUND at $opusHeaderPath"
-          exit 1
-        }
-        if (Test-Path $opusLibPath) {
-          echo "SUCCESS: Found Opus library at $opusLibPath"
-        } else {
-          echo "FATAL: Opus library NOT FOUND at $opusLibPath"
-          exit 1
-        }
-
-    - name: 10. Build PJSIP Libraries
-      shell: pwsh
-      continue-on-error: true # Keep this in case non-essential samples fail for other reasons
-      run: |
-        echo "Building the entire PJSIP solution..."
+        echo "Building the entire PJSIP solution (pjproject-vs14.sln)..."
         msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
 
-    - name: 11. Prepare Libraries for Final Linkage
+    - name: 9. Copy Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Preparing all required libraries for MicroSIP ---"
         $microsip_lib_dir = "sufficit-microsip/lib"
-        $microsip_opus_dir = "sufficit-microsip/third_party/opus/Win32"
         New-Item -ItemType Directory -Force -Path $microsip_lib_dir
-        New-Item -ItemType Directory -Force -Path $microsip_opus_dir
         
-        Copy-Item -Path "opus-build/Release/opus.lib" -Destination $microsip_opus_dir
-        echo "Copied opus.lib for MicroSIP."
+        $microsip_opus_dir = "sufficit-microsip/third_party/opus/Win32"
+        New-Item -ItemType Directory -Force -Path $microsip_opus_dir
 
-        $pjlib_source = Get-Item "lib/libpjproject-*.lib"
-        if ($pjlib_source) {
-            $pjlib_dest_renamed = "$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
-            Copy-Item -Path $pjlib_source.FullName -Destination $pjlib_dest_renamed -Force
-            echo "Copied and Renamed main PJSIP library."
-        } else {
-            echo "WARNING: Main PJSIP aggregated library was not found. The final build may fail."
-        }
+        # The PJSIP build will have created libopus in its own lib dir. Copy it.
+        Copy-Item -Path "third_party/lib/libopus-*.lib" -Destination $microsip_opus_dir/opus.lib -Force
+        echo "Copied Opus library for MicroSIP."
 
-    - name: 12. Generate Version Tag
+        # The PJSIP build creates the aggregated lib. Copy and rename it.
+        $pjlib_source = Get-Item "lib/libpjproject-i386-Win32-vc14-Release.lib"
+        $pjlib_dest_renamed = "$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
+        Copy-Item -Path $pjlib_source.FullName -Destination $pjlib_dest_renamed -Force
+        echo "Copied and Renamed main PJSIP library."
+
+    - name: 10. Generate Version Tag
       id: generate_version
       working-directory: ./sufficit-microsip
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       
-    - name: 13. Build the final project
+    - name: 11. Build the final project
       working-directory: ./sufficit-microsip
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 14. Upload build artifact
+    - name: 12. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
