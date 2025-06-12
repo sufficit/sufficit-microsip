@@ -50,38 +50,41 @@ jobs:
         "@
         Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
 
-    # ===================== NOVO PASSO PARA COMPILAR O OPUS =====================
     - name: 5. Build Opus Dependency
       shell: pwsh
       run: |
-        echo "Clonando repositório do Opus..."
         git clone --depth 1 https://github.com/xiph/opus.git opus-source
-        
-        echo "Configurando Opus com CMake..."
-        # Gera os arquivos de projeto do Visual Studio 2022 para 32-bits (Win32)
         cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
-
-        echo "Compilando Opus com CMake/MSBuild..."
         cmake --build opus-build --config Release
-    # =======================================================================
 
-    - name: 6. Generate Version Tag
+    # ===================== NOVO PASSO DE CÓPIA =====================
+    - name: 6. Copy Opus library to expected location
+      shell: pwsh
+      run: |
+        # Cria a estrutura de pastas que o projeto principal espera
+        $dest_dir = "sufficit-microsip/third_party/opus/Win32"
+        New-Item -ItemType Directory -Force -Path $dest_dir
+        
+        # Copia a biblioteca compilada para o destino
+        Copy-Item -Path "opus-build/Release/opus.lib" -Destination $dest_dir
+    # =============================================================
+
+    - name: 7. Generate Version Tag
       id: generate_version
       working-directory: ./sufficit-microsip
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-    - name: 7. Add MSBuild to path
+    - name: 8. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
       
-    - name: 8. Build the project
+    - name: 9. Build the project
       working-directory: ./sufficit-microsip
-      run: |
-        # Adiciona o caminho da biblioteca Opus recém-compilada
-        msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj /p:AdditionalLibraryDirectories="..\opus-build\Release"
+      # Comando de build voltou a ser simples, sem parâmetros extras
+      run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 9. Upload build artifact
+    - name: 10. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
