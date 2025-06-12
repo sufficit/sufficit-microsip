@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 8
+# WORKFLOW VERSION: 9
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -15,12 +15,13 @@
 #
 # == Objective of This Version ==
 #
-# 3.  **Patch PJSIP Project File (Step 6):** The script in the previous version had a YAML syntax
-#     error. This version uses a rewritten, YAML-safe PowerShell script to correctly modify
-#     the `pjmedia-codec.vcxproj` file, adding the required include path for the Opus headers.
+# 3.  **Patch PJSIP Project File (Step 6):** The previous scripts failed due to PowerShell parsing
+#     errors. This version uses a literal "Here-String" (@'...') to define the target condition,
+#     which is the most robust way to handle strings with special characters in PowerShell,
+#     preventing any misinterpretation by the runner.
 #
-# 4.  **Unified PJSIP Build (Step 8):** With the project file successfully patched, this step
-#     will build the entire PJSIP solution. A full success is now expected.
+# 4.  **Unified PJSIP Build (Step 8):** The goal is for the patching to finally succeed, allowing
+#     the PJSIP solution to build completely.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -88,9 +89,14 @@ jobs:
         $projFile = "pjmedia/build/pjmedia_codec.vcxproj"
         echo "Loading project file: $projFile"
         $xml = [xml](Get-Content $projFile)
-        $targetCondition = "'$(Configuration)|$(Platform)'=='Release|Win32'"
-        $patched = $false
+        
+        # Use a literal here-string to define the exact condition text.
+        # This is the safest way to handle strings with special characters like '$' and '|'.
+        $targetCondition = @'
+'$(Configuration)|$(Platform)'=='Release|Win32'
+'@
 
+        $patched = $false
         foreach ($group in $xml.Project.ItemDefinitionGroup) {
             if ($group.Condition -eq $targetCondition) {
                 echo "Found matching configuration. Patching..."
