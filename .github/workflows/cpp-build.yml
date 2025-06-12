@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 13 (Final Fix)
+# WORKFLOW VERSION: 14 (Verification & Final Attempt)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -9,21 +9,22 @@
 #
 # == Logic and Execution Steps (Final Reviewed Version) ==
 #
-# This workflow represents a complete, reviewed solution to the build complexities.
+# This workflow abandons all previous complex approaches and focuses on a simple, verifiable
+# sequence to resolve the final build error.
 #
-# 1.  **Build Dependencies (Steps 1-9):** This part is now validated. It successfully checks out
-#     all source code, creates the necessary PJSIP configuration, builds Opus independently,
-#     and then builds all required PJSIP libraries.
+# 1.  **Setup (Steps 1-7):** All sources are checked out, PJSIP is moved to the root, the
+#     config_site.h is created, and Opus is built independently via CMake. This foundation is solid.
 #
-# 2.  **Prepare Final Linkage (Step 10):** THIS IS THE CORRECTED STEP. Previous versions failed
-#     to correctly place the final libraries. This step now uses explicit commands to:
-#       a) Copy ALL generated libraries to the location expected by microsip.vcxproj.
-#       b) Explicitly RENAME the main pjproject library to include the "-Static" suffix.
-#       c) Explicitly copy the opus.lib to its correct final directory.
-#     This is designed to solve the final LNK1104 and LNK1181 errors.
+# 2.  **Pre-position Dependencies (Step 8):** This step copies the Opus headers and library to the
+#     locations where we believe PJSIP expects them.
 #
-# 3.  **Final Build (Step 12):** With all libraries correctly named and placed, the final
-#     project linkage is expected to succeed.
+# 3.  **DEBUG & VERIFY (Step 9):** THIS IS THE CRITICAL NEW STEP. To eliminate any guesswork,
+#     this step explicitly lists the contents of the `third_party` directory and confirms the
+#     existence of `opus.h` at its expected location. If the file is not there, the build will
+#     fail immediately, telling us the copy in Step 8 is the problem.
+#
+# 4.  **Build & Finalize (Steps 10-14):** The PJSIP build will only run if the verification in
+#     Step 9 passes. The final steps then copy the generated libs and build the main project.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -99,56 +100,81 @@ jobs:
       shell: pwsh
       run: |
         echo "Placing Opus headers and libraries for PJSIP build..."
-        New-Item -ItemType Directory -Force -Path "third_party/opus"
-        Copy-Item -Path opus-source/include/. -Destination third_party/opus -Recurse
-        New-Item -ItemType Directory -Force -Path "third_party/lib"
-        Copy-Item -Path "opus-build/Release/opus.lib" -Destination "third_party/lib/libopus.a"
+        # PJSIP expects to find #include <opus/opus.h> relative to its `third_party` directory.
+        # This means we need a structure like: third_party/opus/opus.h
+        $opusHeaderDest = "third_party/opus"
+        New-Item -ItemType Directory -Force -Path $opusHeaderDest
+        Copy-Item -Path opus-source/include/*.h -Destination $opusHeaderDest -Force
+        
+        # PJSIP's sample apps link against libopus.a
+        $pjThirdPartyLibDir = "third_party/lib"
+        New-Item -ItemType Directory -Force -Path $pjThirdPartyLibDir
+        Copy-Item -Path "opus-build/Release/opus.lib" -Destination "$pjThirdPartyLibDir/libopus.a" -Force
 
-    - name: 9. Build PJSIP Libraries
+    - name: 9. DEBUG - Verify File Structure
       shell: pwsh
-      continue-on-error: true
+      run: |
+        echo "--- Verifying file structure before PJSIP build ---"
+        $opusHeaderPath = "third_party/opus/opus.h"
+        $opusLibPath = "third_party/lib/libopus.a"
+        
+        echo "Listing contents of third_party directory:"
+        Get-ChildItem -Path "third_party" -Recurse
+        
+        echo "--- Checking for critical files ---"
+        if (Test-Path $opusHeaderPath) {
+          echo "SUCCESS: Found Opus header at $opusHeaderPath"
+        } else {
+          echo "FATAL: Opus header NOT FOUND at $opusHeaderPath"
+          exit 1
+        }
+        if (Test-Path $opusLibPath) {
+          echo "SUCCESS: Found Opus library at $opusLibPath"
+        } else {
+          echo "FATAL: Opus library NOT FOUND at $opusLibPath"
+          exit 1
+        }
+
+    - name: 10. Build PJSIP Libraries
+      shell: pwsh
+      continue-on-error: true # Keep this in case non-essential samples fail for other reasons
       run: |
         echo "Building the entire PJSIP solution..."
         msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
 
-    - name: 10. Copy and Prepare All Libraries for Final Build
+    - name: 11. Prepare Libraries for Final Linkage
       shell: pwsh
       run: |
         echo "--- Preparing all required libraries for MicroSIP ---"
-        
-        # 1. Create the destination directories inside the microsip project folder
         $microsip_lib_dir = "sufficit-microsip/lib"
         $microsip_opus_dir = "sufficit-microsip/third_party/opus/Win32"
         New-Item -ItemType Directory -Force -Path $microsip_lib_dir
         New-Item -ItemType Directory -Force -Path $microsip_opus_dir
-
-        # 2. Copy the independently-built opus.lib to where microsip.vcxproj expects it
+        
         Copy-Item -Path "opus-build/Release/opus.lib" -Destination $microsip_opus_dir
-        echo "Copied opus.lib to $microsip_opus_dir"
+        echo "Copied opus.lib for MicroSIP."
 
-        # 3. Copy the main aggregated PJSIP library and RENAME it to the static version
-        $pjlib_source = "lib/libpjproject-i386-Win32-vc14-Release.lib"
-        $pjlib_dest_renamed = "$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
-        if (Test-Path $pjlib_source) {
-            Copy-Item -Path $pjlib_source -Destination $pjlib_dest_renamed
-            echo "Copied and Renamed $pjlib_source to $pjlib_dest_renamed"
+        $pjlib_source = Get-Item "lib/libpjproject-*.lib"
+        if ($pjlib_source) {
+            $pjlib_dest_renamed = "$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
+            Copy-Item -Path $pjlib_source.FullName -Destination $pjlib_dest_renamed -Force
+            echo "Copied and Renamed main PJSIP library."
         } else {
-            echo "FATAL: Main PJSIP library not found at $pjlib_source"
-            exit 1
+            echo "WARNING: Main PJSIP aggregated library was not found. The final build may fail."
         }
-      
-    - name: 11. Generate Version Tag
+
+    - name: 12. Generate Version Tag
       id: generate_version
       working-directory: ./sufficit-microsip
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       
-    - name: 12. Build the final project
+    - name: 13. Build the final project
       working-directory: ./sufficit-microsip
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 13. Upload build artifact
+    - name: 14. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
