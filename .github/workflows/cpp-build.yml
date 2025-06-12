@@ -1,7 +1,8 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# Author: Gemini AI for Google
+# Author: Hugo Castro de Deco, Sufficit
+# Collaboration: Gemini AI for Google
 # Date: June 12, 2025
 #
 # == Workflow Logic and Execution Steps ==
@@ -19,16 +20,20 @@
 #     - Step 4 (`Create PJSIP config_site.h`): Generates the mandatory PJSIP configuration file
 #       `pjlib/include/pj/config_site.h` with the specific feature macros required by MicroSIP.
 #
-# 3.  **Build Dependencies from Source:**
+# 3.  **Setup Build Environment:**
+#     - Step 5 (`Add MSBuild to path`): This crucial step configures the environment, making the
+#       `msbuild.exe` command available for all subsequent build tasks.
+#
+# 4.  **Build Dependencies from Source:**
 #     - Third-party libraries are built from source to ensure compatibility.
-#     - Step 5 (`Build PJSIP Libraries`): Compiles the entire PJSIP solution. This creates the main
+#     - Step 6 (`Build PJSIP Libraries`): Compiles the entire PJSIP solution. This creates the main
 #       `libpjproject...lib` file needed by the linker.
-#     - Step 6 (`Build Opus Dependency`): Clones and compiles the Opus audio codec, producing `opus.lib`.
-#     - Step 7 (`Copy Opus library...`): Copies the compiled `opus.lib` into the
+#     - Step 7 (`Build Opus Dependency`): Clones and compiles the Opus audio codec, producing `opus.lib`.
+#     - Step 8 (`Copy Opus library...`): Copies the compiled `opus.lib` into the
 #       `third_party/opus/Win32/` directory, where the linker is configured to look for it.
 #
-# 4.  **Build and Release the Main Project:**
-#     - The final steps set up the build environment, run the MSBuild command for the main project,
+# 5.  **Build and Release the Main Project:**
+#     - The final steps generate a version tag, run the MSBuild command for the main project,
 #       upload the resulting .exe as an artifact, and create a GitHub Release.
 # =================================================================================================
 
@@ -84,39 +89,37 @@ jobs:
         "@
         Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
 
-    # ===================== NOVO PASSO PARA COMPILAR A PJSIP =====================
-    - name: 5. Build PJSIP Libraries
+    # ===================== PASSO MOVIDO PARA CIMA =====================
+    - name: 5. Add MSBuild to path
+      uses: microsoft/setup-msbuild@v2
+    # ================================================================
+
+    - name: 6. Build PJSIP Libraries
       shell: pwsh
       run: |
         echo "Building PJSIP solution..."
-        # Build the VS 2015 solution file; MSBuild will auto-upgrade it.
-        # The output libraries will be placed in the various `lib` folders inside the PJSIP folders.
         msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
-    # ==========================================================================
 
-    - name: 6. Build Opus Dependency
+    - name: 7. Build Opus Dependency
       shell: pwsh
       run: |
         git clone --depth 1 https://github.com/xiph/opus.git opus-source
         cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
         cmake --build opus-build --config Release
 
-    - name: 7. Copy Opus library to expected location
+    - name: 8. Copy Opus library to expected location
       shell: pwsh
       run: |
         $dest_dir = "third_party/opus/Win32"
         New-Item -ItemType Directory -Force -Path $dest_dir
         Copy-Item -Path "opus-build/Release/opus.lib" -Destination $dest_dir
 
-    - name: 8. Generate Version Tag
+    - name: 9. Generate Version Tag
       id: generate_version
       working-directory: ./sufficit-microsip
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-    - name: 9. Add MSBuild to path
-      uses: microsoft/setup-msbuild@v2
       
     - name: 10. Build the project
       working-directory: ./sufficit-microsip
