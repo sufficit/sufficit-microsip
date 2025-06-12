@@ -1,31 +1,29 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 12 (Final)
+# WORKFLOW VERSION: 13 (Final Fix)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 12, 2025
 #
-# == Logic and Execution Steps (Consolidated) ==
+# == Logic and Execution Steps (Final Reviewed Version) ==
 #
 # This workflow represents a complete, reviewed solution to the build complexities.
 #
-# 1.  **Checkout & Structure (Steps 1-4):** All repositories are checked out. PJSIP source code
-#     is moved to the workspace root for correct relative pathing.
-# 2.  **Configuration (Step 5):** The essential `pjlib/include/pj/config_site.h` is created
-#     to enable the necessary codecs.
-# 3.  **Build Opus Independently (Step 7):** Opus is built first using CMake, creating a clean
-#     `opus.lib` library. This isolates its build process entirely.
-# 4.  **Prepare ALL Opus Artifacts (Step 8):** The compiled `opus.lib` and its headers are
-#     explicitly copied to every location they might be needed. This version corrects the
-#     final copy destination for `opus.lib` to match the exact path expected by the
-#     `microsip.vcxproj` linker.
-# 5.  **Build PJSIP (Step 9):** With all dependencies manually placed, the PJSIP solution is
-#     built. The `continue-on-error` flag ensures the process continues even if non-essential
-#     sample applications fail to link.
-# 6.  **Final Build (Step 11):** The final `microsip.vcxproj` links all libraries and produces
-#     the executable.
+# 1.  **Build Dependencies (Steps 1-9):** This part is now validated. It successfully checks out
+#     all source code, creates the necessary PJSIP configuration, builds Opus independently,
+#     and then builds all required PJSIP libraries.
+#
+# 2.  **Prepare Final Linkage (Step 10):** THIS IS THE CORRECTED STEP. Previous versions failed
+#     to correctly place the final libraries. This step now uses explicit commands to:
+#       a) Copy ALL generated libraries to the location expected by microsip.vcxproj.
+#       b) Explicitly RENAME the main pjproject library to include the "-Static" suffix.
+#       c) Explicitly copy the opus.lib to its correct final directory.
+#     This is designed to solve the final LNK1104 and LNK1181 errors.
+#
+# 3.  **Final Build (Step 12):** With all libraries correctly named and placed, the final
+#     project linkage is expected to succeed.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -97,24 +95,14 @@ jobs:
         cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
         cmake --build opus-build --config Release
 
-    - name: 8. Prepare All Opus Artifacts
+    - name: 8. Prepare Opus Artifacts for PJSIP
       shell: pwsh
       run: |
-        echo "Placing Opus headers and libraries for PJSIP and MicroSIP..."
-        
-        # For PJSIP compilation
+        echo "Placing Opus headers and libraries for PJSIP build..."
         New-Item -ItemType Directory -Force -Path "third_party/opus"
         Copy-Item -Path opus-source/include/. -Destination third_party/opus -Recurse
-        
-        # For PJSIP sample apps linking
         New-Item -ItemType Directory -Force -Path "third_party/lib"
         Copy-Item -Path "opus-build/Release/opus.lib" -Destination "third_party/lib/libopus.a"
-
-        # For the final MicroSIP project linking.
-        # This path is relative to the workspace root, as expected by microsip.vcxproj's LIBPATH.
-        $main_lib_dest = "third_party/opus/Win32"
-        New-Item -ItemType Directory -Force -Path $main_lib_dest
-        Copy-Item -Path "opus-build/Release/opus.lib" -Destination $main_lib_dest
 
     - name: 9. Build PJSIP Libraries
       shell: pwsh
@@ -123,12 +111,31 @@ jobs:
         echo "Building the entire PJSIP solution..."
         msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
 
-    - name: 10. Copy PJSIP libraries for Final Linkage
+    - name: 10. Copy and Prepare All Libraries for Final Build
       shell: pwsh
       run: |
-        echo "Copying final PJSIP libraries for MicroSIP project..."
-        New-Item -ItemType Directory -Force -Path "sufficit-microsip/lib"
-        Copy-Item -Path lib/libpjproject-*.lib -Destination "sufficit-microsip/lib/libpjproject-i386-Win32-vc14-Release-Static.lib" -ErrorAction SilentlyContinue
+        echo "--- Preparing all required libraries for MicroSIP ---"
+        
+        # 1. Create the destination directories inside the microsip project folder
+        $microsip_lib_dir = "sufficit-microsip/lib"
+        $microsip_opus_dir = "sufficit-microsip/third_party/opus/Win32"
+        New-Item -ItemType Directory -Force -Path $microsip_lib_dir
+        New-Item -ItemType Directory -Force -Path $microsip_opus_dir
+
+        # 2. Copy the independently-built opus.lib to where microsip.vcxproj expects it
+        Copy-Item -Path "opus-build/Release/opus.lib" -Destination $microsip_opus_dir
+        echo "Copied opus.lib to $microsip_opus_dir"
+
+        # 3. Copy the main aggregated PJSIP library and RENAME it to the static version
+        $pjlib_source = "lib/libpjproject-i386-Win32-vc14-Release.lib"
+        $pjlib_dest_renamed = "$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
+        if (Test-Path $pjlib_source) {
+            Copy-Item -Path $pjlib_source -Destination $pjlib_dest_renamed
+            echo "Copied and Renamed $pjlib_source to $pjlib_dest_renamed"
+        } else {
+            echo "FATAL: Main PJSIP library not found at $pjlib_source"
+            exit 1
+        }
       
     - name: 11. Generate Version Tag
       id: generate_version
