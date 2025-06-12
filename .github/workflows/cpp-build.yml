@@ -7,35 +7,50 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    
+    # Define o diretório de trabalho padrão para os passos de run:
+    defaults:
+      run:
+        working-directory: sufficit-microsip
+
     outputs:
       version: ${{ steps.generate_version.outputs.VERSION }}
 
     steps:
-    - name: 1. Checkout repository and submodules
+    - name: 1. Checkout MicroSip Repository
       uses: actions/checkout@v4
       with:
-        # ===================== LINHA ADICIONADA =====================
-        # Esta opção garante que os submódulos do Git (como pjsip) sejam baixados.
-        submodules: 'recursive'
-        # ==========================================================
+        # Baixa seu projeto para uma pasta específica
+        path: sufficit-microsip
 
-    - name: 2. Generate Version Tag
+    # ===================== PASSO NOVO E CRUCIAL =====================
+    - name: 2. Clone PJSIP Repository
+      uses: actions/checkout@v4
+      with:
+        # Clona o repositório oficial da PJSIP
+        repository: pjsip/pjproject
+        # Para uma pasta chamada 'pjproject' ao lado da sua
+        path: pjproject
+    # ==============================================================
+
+    - name: 3. Generate Version Tag
       id: generate_version
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-    - name: 3. Add MSBuild to path
+    - name: 4. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
       
-    - name: 4. Build the project
+    - name: 5. Build the project
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 5. Upload build artifact
+    - name: 6. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
-        path: Release/microsip.exe
+        # O caminho do artefato precisa ser ajustado pois estamos em um subdiretório
+        path: sufficit-microsip/Release/microsip.exe
 
   release:
     needs: build
