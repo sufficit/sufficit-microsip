@@ -1,37 +1,33 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
+# WORKFLOW VERSION: 2
+#
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 12, 2025
 #
 # == Workflow Logic and Execution Steps ==
 #
-# This workflow automates the build of the MicroSIP C++ project from source, including its key
-# dependencies. Each step is designed to correctly prepare the environment for a successful build.
-#
 # 1.  **Checkout Repositories:**
-#     - Checks out the main `sufficit-microsip` project.
-#     - Checks out the `pjsip/pjproject`.
-#     - **Crucially, checks out the `xiph/opus` source code directly into the location where
-#       the PJSIP build system expects to find it (`pjproject/third_party/opus`).**
+#     - Checks out all necessary source codes: MicroSIP, PJSIP, and Opus.
 #
 # 2.  **Prepare PJSIP Source:**
-#     - Moves the PJSIP source files to the workspace root to match the project's expected
-#       relative include paths (e.g., `..\pjlib`). This also brings the Opus source along.
-#     - Generates the mandatory PJSIP configuration file `pjlib/include/pj/config_site.h` to
-#       enable the required codecs.
+#     - Reorganizes PJSIP files and creates the mandatory `config_site.h`.
 #
-# 3.  **Setup Build Environment & Build ALL Dependencies:**
-#     - Configures the MSBuild environment.
-#     - A single build command for `pjproject-vs14.sln` is now used. Because the Opus source is
-#       in the correct location, the PJSIP solution will build Opus automatically along with
-#       all other PJSIP libraries.
+# 3.  **Build and Prepare Opus Dependency (CRITICAL STEP):**
+#     - Compiles the Opus source code into `opus.lib` using CMake.
+#     - **Prepares Headers:** Copies the Opus headers (`.h` files) to `third_party/opus/`, which is
+#       the exact location the PJSIP compiler will look inside for `opus/opus.h`.
+#     - **Prepares Libraries:**
+#       - Copies `opus.lib` and renames it to `libopus.a` in `third_party/lib/`, fixing the PJSIP
+#         linker error.
+#       - Copies `opus.lib` to `sufficit-microsip/third_party/opus/Win32/`, fixing the main
+#         project's linker error.
 #
-# 4.  **Build and Release the Main Project:**
-#     - After PJSIP and all its dependencies are built, we need to copy the necessary libraries
-#       to the locations expected by the main MicroSIP project.
-#     - Finally, the MicroSIP project itself is built, and the resulting .exe is released.
+# 4.  **Build PJSIP & Final Project:**
+#     - With all Opus dependencies correctly in place, the entire PJSIP solution is built.
+#     - The final MicroSIP project is then built, linking against all the libraries we created.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -58,12 +54,11 @@ jobs:
         repository: pjsip/pjproject
         path: pjproject
 
-    # Passo 3: Baixa o Opus DIRETAMENTE no local esperado pela PJSIP
-    - name: 3. Clone Opus into PJSIP third_party
+    - name: 3. Clone Opus Repository
       uses: actions/checkout@v4
       with:
         repository: xiph/opus
-        path: pjproject/third_party/opus
+        path: opus-source
 
     - name: 4. Restructure PJSIP directories
       shell: pwsh
@@ -96,44 +91,58 @@ jobs:
     - name: 6. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    # Passo 7: Compila a PJSIP e suas dependências (incluindo Opus) de uma só vez
-    - name: 7. Build PJSIP and its Dependencies
+    # CRITICAL STEP: Build and distribute Opus artifacts BEFORE building PJSIP
+    - name: 7. Build and Prepare Opus Dependency
       shell: pwsh
-      # Permite que o build continue mesmo se os projetos de teste/amostra falharem.
+      run: |
+        echo "Building Opus with CMake..."
+        cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
+        cmake --build opus-build --config Release
+        
+        echo "Preparing Opus headers for PJSIP..."
+        # PJSIP's compiler looks for the path "opus/opus.h" inside the "third_party" include directory.
+        # This command creates `third_party/opus/` and copies the header files into it.
+        $header_dest = "third_party/opus"
+        New-Item -ItemType Directory -Force -Path $header_dest
+        Copy-Item -Path opus-source/include/. -Destination $header_dest -Recurse
+
+        echo "Preparing Opus libraries for PJSIP and main project..."
+        # PJSIP's sample apps link against 'libopus.a' and look in 'third_party/lib'.
+        $pjsip_lib_dest = "third_party/lib"
+        New-Item -ItemType Directory -Force -Path $pjsip_lib_dest
+        Copy-Item -Path "opus-build/Release/opus.lib" -Destination "$pjsip_lib_dest/libopus.a"
+
+        # The main MicroSIP project links against 'opus.lib' in its own specific folder.
+        $main_lib_dest = "sufficit-microsip/third_party/opus/Win32"
+        New-Item -ItemType Directory -Force -Path $main_lib_dest
+        Copy-Item -Path "opus-build/Release/opus.lib" -Destination $main_lib_dest
+
+    - name: 8. Build PJSIP Libraries
+      shell: pwsh
+      # PJSIP's sample apps might still fail, but the libraries should be created successfully now.
       continue-on-error: true
       run: |
         echo "Building the entire PJSIP solution..."
         msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
-
-    # Passo 8: Copia as libs necessárias da PJSIP e do Opus para a pasta do projeto principal
-    - name: 8. Copy all required libraries for MicroSIP
+    
+    - name: 9. Copy PJSIP libraries for Final Linkage
       shell: pwsh
       run: |
-        echo "Copying PJSIP libraries..."
+        echo "Copying PJSIP libraries for MicroSIP project..."
         Copy-Item -Path lib/libpjproject-*.lib -Destination sufficit-microsip/lib/
-        
-        echo "Copying third-party libraries built by PJSIP..."
-        $dest_dir = "sufficit-microsip/third_party/lib"
-        New-Item -ItemType Directory -Force -Path $dest_dir
-        Copy-Item -Path third_party/lib/*.lib -Destination $dest_dir
-        
-        echo "Copying Opus library to its specific folder..."
-        $opus_dir = "sufficit-microsip/third_party/opus/Win32"
-        New-Item -ItemType Directory -Force -Path $opus_dir
-        Copy-Item -Path third_party/lib/libopus-*.lib -Destination "$opus_dir/opus.lib"
-
-    - name: 9. Generate Version Tag
+      
+    - name: 10. Generate Version Tag
       id: generate_version
       working-directory: ./sufficit-microsip
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       
-    - name: 10. Build the project
+    - name: 11. Build the final project
       working-directory: ./sufficit-microsip
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 11. Upload build artifact
+    - name: 12. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
