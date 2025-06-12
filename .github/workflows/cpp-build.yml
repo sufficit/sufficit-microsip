@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 4
+# WORKFLOW VERSION: 5
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -9,19 +9,19 @@
 #
 # == Logic and Execution Steps (Validated up to this version) ==
 #
-# 1.  **Checkout & Structure (Steps 1-4):** All repositories are checked out, with Opus's source
+# 1.  **Checkout & Structure (Steps 1-4):** All source codes are checked out, with Opus's source
 #     placed inside PJSIP's `third_party` directory. PJSIP is moved to the workspace root.
 # 2.  **Configuration (Step 5):** The mandatory `pjlib/include/pj/config_site.h` is created.
 #
 # == Objective of This Version ==
 #
-# 3.  **Fix Header Inconsistency (Step 6):** Addresses the core issue where different PJSIP
-#     projects expect Opus headers in different locations. This step copies the headers from
-#     `third_party/opus/include` up one level to `third_party/opus`, making them available
-#     in BOTH expected locations.
+# 3.  **Fix Header Inconsistency (Step 6):** The previous copy command failed. This version uses
+#     a simpler, more direct command to copy only the header files (*.h) from
+#     `third_party/opus/include/` to `third_party/opus/`, ensuring they exist in both required
+#     locations without causing a recursive copy error.
 #
 # 4.  **Unified PJSIP Build (Step 8):** With all sources and headers correctly placed, this step
-#     builds the entire `pjproject-vs14.sln`. PJSIP is now expected to successfully build itself
+#     attempts to build the entire PJSIP solution. PJSIP is now expected to successfully build itself
 #     AND its included Opus dependency without errors.
 #
 # 5.  **Final Linkage (Steps 9 & 11):** The resulting `.lib` files are copied to the locations
@@ -44,6 +44,7 @@ jobs:
     - name: 1. Checkout MicroSip Repository
       uses: actions/checkout@v4
       with:
+        repository: sufficit/sufficit-microsip
         path: sufficit-microsip
 
     - name: 2. Clone PJSIP Repository
@@ -86,19 +87,17 @@ jobs:
         "@
         Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
 
-    # NOVO PASSO CRÍTICO
     - name: 6. Fix PJSIP Header Inconsistency for Opus
       shell: pwsh
       run: |
         echo "Copying Opus headers to satisfy both pjmedia-codec and libopus projects..."
-        Copy-Item -Path third_party/opus/include/. -Destination third_party/opus/ -Recurse
+        Copy-Item -Path third_party/opus/include/*.h -Destination third_party/opus/ -Force
         
     - name: 7. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
     - name: 8. Build PJSIP and ALL its Dependencies
       shell: pwsh
-      # This step should now succeed entirely. If it fails, the error will be our new clue.
       run: |
         echo "Building the entire PJSIP solution..."
         msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
