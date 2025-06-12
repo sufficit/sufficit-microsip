@@ -11,8 +11,13 @@ jobs:
       version: ${{ steps.generate_version.outputs.VERSION }}
 
     steps:
-    - name: 1. Checkout repository
+    - name: 1. Checkout repository and submodules
       uses: actions/checkout@v4
+      with:
+        # ===================== LINHA ADICIONADA =====================
+        # Esta opção garante que os submódulos do Git (como pjsip) sejam baixados.
+        submodules: 'recursive'
+        # ==========================================================
 
     - name: 2. Generate Version Tag
       id: generate_version
@@ -30,7 +35,6 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
-        # IMPORTANTE: Verifique se este é o caminho correto do .exe após a compilação.
         path: Release/microsip.exe
 
   release:
