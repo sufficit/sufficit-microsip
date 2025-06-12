@@ -57,12 +57,12 @@ jobs:
         cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
         cmake --build opus-build --config Release
 
-    # --- Este é o passo que estava faltando no seu último log ---
+    # ===================== PASSO 6 CORRIGIDO =====================
     - name: 6. Copy Opus library to expected location
       shell: pwsh
       run: |
-        # Cria a estrutura de pastas que o projeto principal espera
-        $dest_dir = "sufficit-microsip/third_party/opus/Win32"
+        # Cria a estrutura de pastas na raiz do workspace, como o projeto espera
+        $dest_dir = "third_party/opus/Win32"
         New-Item -ItemType Directory -Force -Path $dest_dir
         
         # Copia a biblioteca compilada para o destino
@@ -80,7 +80,6 @@ jobs:
       
     - name: 9. Build the project
       working-directory: ./sufficit-microsip
-      # O comando de build está "limpo" novamente
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
     - name: 10. Upload build artifact
