@@ -1,15 +1,15 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 11 (Simplified & Corrected)
+# WORKFLOW VERSION: 12 (Final)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 12, 2025
 #
-# == Logic and Execution Steps (Final Reviewed Version) ==
+# == Logic and Execution Steps (Consolidated) ==
 #
-# This workflow abandons complex scripting in favor of a direct, step-by-step approach.
+# This workflow represents a complete, reviewed solution to the build complexities.
 #
 # 1.  **Checkout & Structure (Steps 1-4):** All repositories are checked out. PJSIP source code
 #     is moved to the workspace root for correct relative pathing.
@@ -18,11 +18,14 @@
 # 3.  **Build Opus Independently (Step 7):** Opus is built first using CMake, creating a clean
 #     `opus.lib` library. This isolates its build process entirely.
 # 4.  **Prepare ALL Opus Artifacts (Step 8):** The compiled `opus.lib` and its headers are
-#     explicitly copied to every location they might be needed by both PJSIP and the final
-#     project. This includes renaming a copy to `libopus.a` to satisfy the PJSIP sample apps' linker.
-#     This preemptively solves both compilation and linking dependency issues for PJSIP.
-# 5.  **Build PJSIP & Final Project (Steps 9-12):** With all dependencies manually placed, the
-#     PJSIP solution is built, followed by the final MicroSIP project.
+#     explicitly copied to every location they might be needed. This version corrects the
+#     final copy destination for `opus.lib` to match the exact path expected by the
+#     `microsip.vcxproj` linker.
+# 5.  **Build PJSIP (Step 9):** With all dependencies manually placed, the PJSIP solution is
+#     built. The `continue-on-error` flag ensures the process continues even if non-essential
+#     sample applications fail to link.
+# 6.  **Final Build (Step 11):** The final `microsip.vcxproj` links all libraries and produces
+#     the executable.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -99,21 +102,22 @@ jobs:
       run: |
         echo "Placing Opus headers and libraries for PJSIP and MicroSIP..."
         
-        # For PJSIP compilation (solves opus/opus.h not found)
+        # For PJSIP compilation
+        New-Item -ItemType Directory -Force -Path "third_party/opus"
         Copy-Item -Path opus-source/include/. -Destination third_party/opus -Recurse
         
-        # For PJSIP sample apps linking (solves libopus.a not found)
+        # For PJSIP sample apps linking
         New-Item -ItemType Directory -Force -Path "third_party/lib"
         Copy-Item -Path "opus-build/Release/opus.lib" -Destination "third_party/lib/libopus.a"
 
-        # For the final MicroSIP project linking
-        $main_lib_dest = "sufficit-microsip/third_party/opus/Win32"
+        # For the final MicroSIP project linking.
+        # This path is relative to the workspace root, as expected by microsip.vcxproj's LIBPATH.
+        $main_lib_dest = "third_party/opus/Win32"
         New-Item -ItemType Directory -Force -Path $main_lib_dest
         Copy-Item -Path "opus-build/Release/opus.lib" -Destination $main_lib_dest
 
     - name: 9. Build PJSIP Libraries
       shell: pwsh
-      # PJSIP's sample apps might still fail on other issues, but the core libraries should build.
       continue-on-error: true
       run: |
         echo "Building the entire PJSIP solution..."
@@ -123,9 +127,8 @@ jobs:
       shell: pwsh
       run: |
         echo "Copying final PJSIP libraries for MicroSIP project..."
-        Copy-Item -Path lib/libpjproject-*.lib -Destination sufficit-microsip/lib/ -ErrorAction SilentlyContinue
-        # The line below handles a potential naming difference for the main library
-        Copy-Item -Path lib/libpjproject-*.lib -Destination sufficit-microsip/lib/libpjproject-i386-Win32-vc14-Release-Static.lib -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path "sufficit-microsip/lib"
+        Copy-Item -Path lib/libpjproject-*.lib -Destination "sufficit-microsip/lib/libpjproject-i386-Win32-vc14-Release-Static.lib" -ErrorAction SilentlyContinue
       
     - name: 11. Generate Version Tag
       id: generate_version
