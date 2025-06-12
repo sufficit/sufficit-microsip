@@ -1,0 +1,67 @@
+name: Build C++ and Create Release
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    # Este trabalho executa em Windows para compilar o projeto
+    runs-on: windows-latest
+    
+    # Define uma "saída" para que o número da versão possa ser usado por outros trabalhos
+    outputs:
+      version: ${{ steps.generate_version.outputs.VERSION }}
+
+    steps:
+    - name: 1. Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 2. Generate Version Tag
+      id: generate_version
+      run: |
+        # Gera uma tag no formato v<ano>.<mes>.<dia>.<numero_do_build> e a expõe para outros trabalhos
+        $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
+        echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+    - name: 3. Add MSBuild to path
+      uses: microsoft/setup-msbuild@v2
+
+    - name: 4. Build the project
+      run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
+
+    - name: 5. Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: microsip-build
+        # O caminho para o executável gerado.
+        # IMPORTANTE: Verifique se este é o caminho correto após a compilação.
+        path: Release/microsip.exe
+
+  release:
+    # Este trabalho só executa após o 'build' ser concluído com sucesso
+    needs: build
+    
+    # Pode executar em Ubuntu, que é mais rápido e barato para tarefas que não são de build
+    runs-on: ubuntu-latest
+    
+    # Permissão necessária para criar uma Release
+    permissions:
+      contents: write
+
+    steps:
+    - name: 1. Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: microsip-build
+
+    - name: 2. Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        # Usa a versão gerada no trabalho de build
+        tag_name: ${{ needs.build.outputs.version }}
+        name: "Release ${{ needs.build.outputs.version }}"
+        body: |
+          Versão compilada automaticamente a partir do último push para a branch main.
+        # Lista dos arquivos a serem anexados na Release
+        files: microsip.exe
