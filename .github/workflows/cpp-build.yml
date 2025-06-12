@@ -22,15 +22,12 @@ jobs:
         repository: pjsip/pjproject
         path: pjproject
 
-    # ===================== PASSO FINAL DE CORREÇÃO =====================
     - name: 3. Restructure PJSIP directories for build
       shell: pwsh
       run: |
-        # Move o conteúdo da pasta 'pjproject' para a raiz do workspace
         Move-Item -Path ${{ github.workspace }}\pjproject\* -Destination ${{ github.workspace }}\
-        # Remove a pasta 'pjproject' que agora está vazia
-        Remove-Item -Path ${{ github.workspace }}\pjproject -Recurse
-    # =================================================================
+        # Adicionado -Force para deletar a pasta .git que é protegida
+        Remove-Item -Path ${{ github.workspace }}\pjproject -Recurse -Force
 
     - name: 4. Generate Version Tag
       id: generate_version
