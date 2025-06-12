@@ -16,8 +16,9 @@
 # 2.  **Prepare PJSIP Source & Dependencies:**
 #     - Moves the PJSIP source files to the workspace root to match the project's expected
 #       relative include paths (e.g., `..\pjlib`, `..\pjsip`).
-#     - Generates the mandatory PJSIP configuration file `pjlib/include/pj/config_site.h`.
-#     - Copies the Opus header files into the `third_party/opus/include` directory, making them
+#     - Generates the mandatory PJSIP configuration file `pjlib/include/pj/config_site.h` with
+#       the specific feature macros required by MicroSIP.
+#     - Copies the Opus header files into the `third_party/opus` directory, making them
 #       available for the PJSIP build process.
 #
 # 3.  **Setup Build Environment & Build Dependencies:**
@@ -56,19 +57,13 @@ jobs:
         repository: pjsip/pjproject
         path: pjproject
 
-    - name: 3. Clone Opus Repository
-      uses: actions/checkout@v4
-      with:
-        repository: xiph/opus
-        path: opus-source
-
-    - name: 4. Restructure PJSIP directories
+    - name: 3. Restructure PJSIP directories
       shell: pwsh
       run: |
         Move-Item -Path ${{ github.workspace }}\pjproject\* -Destination ${{ github.workspace }}\
         Remove-Item -Path ${{ github.workspace }}\pjproject -Recurse -Force
 
-    - name: 5. Create PJSIP config_site.h
+    - name: 4. Create PJSIP config_site.h
       shell: pwsh
       run: |
         $config = @"
@@ -90,11 +85,17 @@ jobs:
         "@
         Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
 
+    - name: 5. Clone Opus Repository
+      uses: actions/checkout@v4
+      with:
+        repository: xiph/opus
+        path: opus-source
+
     - name: 6. Prepare Opus Headers for PJSIP build
       shell: pwsh
       run: |
-        # PJSIP's build process looks for headers inside `third_party/opus/include`
-        $dest_dir = "third_party/opus/include"
+        # PJSIP's build process looks for headers inside `third_party/opus`
+        $dest_dir = "third_party/opus"
         New-Item -ItemType Directory -Force -Path $dest_dir
         Copy-Item -Path opus-source/include/* -Destination $dest_dir -Recurse
 
