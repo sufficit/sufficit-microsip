@@ -13,22 +13,22 @@
 # 1.  **Checkout Repositories:**
 #     - Checks out the main `sufficit-microsip`, `pjsip/pjproject`, and `xiph/opus` repositories.
 #
-# 2.  **Prepare PJSIP Source:**
+# 2.  **Prepare PJSIP Source & Dependencies:**
 #     - Moves the PJSIP source files to the workspace root to match the project's expected
 #       relative include paths (e.g., `..\pjlib`, `..\pjsip`).
-#     - Generates the mandatory PJSIP configuration file `pjlib/include/pj/config_site.h` with
-#       the specific macros required by MicroSIP.
+#     - Generates the mandatory PJSIP configuration file `pjlib/include/pj/config_site.h`.
+#     - Copies the Opus header files into the `third_party/opus/include` directory, making them
+#       available for the PJSIP build process.
 #
-# 3.  **Build Dependencies from Source:**
-#     - Step 6 (`Prepare Opus Headers`): Copies the Opus header files into the `third_party/opus`
-#       directory, making them available to the PJSIP build process.
-#     - Step 7 (`Build PJSIP Libraries`): Compiles the entire PJSIP solution to produce its libraries.
-#     - Step 8 (`Build Opus Dependency`): Compiles the Opus source code to produce `opus.lib`.
-#     - Step 9 (`Copy Opus library...`): Copies the compiled `opus.lib` into the
-#       `third_party/opus/Win32/` directory, where the main project's linker expects it.
+# 3.  **Setup Build Environment & Build Dependencies:**
+#     - Configures the MSBuild environment.
+#     - Compiles the entire PJSIP solution to produce its libraries (.lib files).
+#     - Compiles the Opus source code to produce `opus.lib`.
+#     - Copies the compiled `opus.lib` into the `third_party/opus/Win32/` directory, where the
+#       main project's linker expects to find it.
 #
 # 4.  **Build and Release the Main Project:**
-#     - The final steps set up the build environment, run the MSBuild command for the main project,
+#     - The final steps generate a version tag, run the MSBuild command for the main project,
 #       upload the resulting .exe as an artifact, and create a GitHub Release.
 # =================================================================================================
 
@@ -56,13 +56,19 @@ jobs:
         repository: pjsip/pjproject
         path: pjproject
 
-    - name: 3. Restructure PJSIP directories
+    - name: 3. Clone Opus Repository
+      uses: actions/checkout@v4
+      with:
+        repository: xiph/opus
+        path: opus-source
+
+    - name: 4. Restructure PJSIP directories
       shell: pwsh
       run: |
         Move-Item -Path ${{ github.workspace }}\pjproject\* -Destination ${{ github.workspace }}\
         Remove-Item -Path ${{ github.workspace }}\pjproject -Recurse -Force
 
-    - name: 4. Create PJSIP config_site.h
+    - name: 5. Create PJSIP config_site.h
       shell: pwsh
       run: |
         $config = @"
@@ -84,21 +90,14 @@ jobs:
         "@
         Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h" -Value $config
 
-    - name: 5. Clone Opus Repository
-      uses: actions/checkout@v4
-      with:
-        repository: xiph/opus
-        path: opus-source
-
-    # ===================== NOVO PASSO PARA PREPARAR HEADERS =====================
     - name: 6. Prepare Opus Headers for PJSIP build
       shell: pwsh
       run: |
-        # PJSIP's build process looks for headers inside `third_party/opus`
+        # PJSIP's build process looks for headers inside `third_party/opus/include`
         $dest_dir = "third_party/opus/include"
         New-Item -ItemType Directory -Force -Path $dest_dir
-        Copy-Item -Path opus-source/include/* -Destination $dest_dir
-        
+        Copy-Item -Path opus-source/include/* -Destination $dest_dir -Recurse
+
     - name: 7. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
