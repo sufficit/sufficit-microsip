@@ -1,31 +1,19 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 15 (Final - Isolate Patch Script)
-#
-# Author: Hugo Castro de Deco, Sufficit
-# Collaboration: Gemini AI for Google
-# Date: June 12, 2025
+# WORKFLOW VERSION: 16 (Final - External Scripts)
 #
 # == Logic and Execution Steps (Final Reviewed Version) ==
 #
-# This workflow uses a robust, industry-standard approach to solve the YAML syntax errors by
-# completely isolating the complex PowerShell script into its own file.
+# This workflow uses a robust, industry-standard approach to solve all YAML syntax errors by
+# completely isolating complex PowerShell scripts into their own files.
 #
-# 1.  **Setup (Steps 1-4):** Standard checkout and directory restructuring. This is validated.
-#
+# 1.  **Setup (Steps 1-4):** Standard checkout and directory restructuring.
 # 2.  **Configuration (Step 5):** Creates the mandatory `pjlib/include/pj/config_site.h`.
-#
-# 3.  **Create Patch Script (Step 6):** A new, critical step that writes the robust PowerShell
-#     patching logic to its own file, `patch.ps1`. This prevents the GitHub Actions YAML parser
-#     from ever touching the complex script content. THIS IS THE FIX for all previous syntax errors.
-#
-# 4.  **Execute Patch Script (Step 7):** Simply executes the newly created `.ps1` file. This
-#     patches the broken `pjmedia-codec.vcxproj` file to add the correct Opus include path.
-#
-# 5.  **Build & Finalize (Steps 9-13):** With the PJSIP project now truly fixed, the main solution
-#     build (without `continue-on-error`) will succeed, allowing all subsequent copy, rename,
-#     and final build steps to function as intended.
+# 3.  **Execute Patch Script (Step 6):** Executes the `patch.ps1` script from the repository root.
+#     This script fixes the broken PJSIP project file. This is the key fix.
+# 4.  **Build PJSIP (Step 8):** Builds the entire, now-corrected, PJSIP solution.
+# 5.  **Prepare & Link (Steps 9-12):** Copies all necessary libraries and builds the final project.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -41,7 +29,7 @@ jobs:
       version: ${{ steps.generate_version.outputs.VERSION }}
 
     steps:
-    - name: 1. Checkout MicroSip Repository
+    - name: 1. Checkout MicroSip Repository & Scripts
       uses: actions/checkout@v4
       with:
         repository: sufficit/sufficit-microsip
@@ -79,62 +67,22 @@ jobs:
 #define PJSUA_MAX_CALLS 32
 "@ | Set-Content -Path "${{ github.workspace }}\pjlib\include\pj\config_site.h"
         echo "Created pjlib/include/pj/config_site.h"
-
-    - name: 6. Create PJSIP Patch Script
+        
+    - name: 6. Execute PJSIP Patch Script
       shell: pwsh
-      run: |
-        @"
-        \$projFile = "pjmedia/build/pjmedia-codec.vcxproj"
-        Write-Host "Loading project file to patch: \$projFile"
-        \$xml = [xml](Get-Content \$projFile)
-        
-        # Using a literal Here-String to define the target condition to avoid YAML parsing issues.
-        \$targetCondition = @'
-'$(Configuration)|$(Platform)'=='Release|Win32'
-'@
-        \$patched = \$false
-        
-        foreach (\$group in \$xml.Project.ItemDefinitionGroup) {
-            if (\$group.Condition -eq \$targetCondition) {
-                Write-Host "Found 'Release|Win32' configuration. Patching..."
-                \$includeDirsNode = \$group.ClCompile.AdditionalIncludeDirectories
-                \$currentIncludes = \$includeDirsNode.'#text'
-                \$newIncludePath = ";../../third_party/opus/include"
-
-                if (\$currentIncludes -notlike "*\$newIncludePath*") {
-                    \$includeDirsNode.'#text' = \$currentIncludes + \$newIncludePath
-                    Write-Host "Successfully patched include path."
-                } else {
-                    Write-Host "Include path already exists. No patch needed."
-                }
-                \$patched = \$true
-                break
-            }
-        }
-        
-        if (-not \$patched) {
-            Write-Host "FATAL: Could not find 'Release|Win32' configuration in \$projFile to patch."
-            exit 1
-        }
-        
-        \$xml.Save(\$projFile)
-        Write-Host "Saved updated project file: \$projFile"
-"@ | Set-Content -Path "patch.ps1"
-
-    - name: 7. Execute PJSIP Patch Script
-      shell: pwsh
+      working-directory: ./sufficit-microsip
       run: ./patch.ps1
         
-    - name: 8. Add MSBuild to path
+    - name: 7. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 9. Build Entire PJSIP Solution
+    - name: 8. Build Entire PJSIP Solution
       shell: pwsh
       run: |
-        echo "Building the entire PJSIP solution..."
+        echo "Building the entire PJSIP solution (pjproject-vs14.sln)..."
         msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
 
-    - name: 10. Prepare Libraries for Final Build
+    - name: 9. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Preparing all required libraries for MicroSIP ---"
@@ -145,25 +93,28 @@ jobs:
         
         $opus_source_file = Get-Item "third_party/lib/libopus-*.lib"
         Copy-Item -Path $opus_source_file.FullName -Destination "$microsip_opus_dir/opus.lib" -Force
-        echo "Copied $($opus_source_file.Name) to $microsip_opus_dir/opus.lib"
+        $opus_name = $opus_source_file.Name
+        echo "Copied $opus_name to $microsip_opus_dir/opus.lib"
 
         $pjlib_source = Get-Item "lib/libpjproject-i386-Win32-vc14-Release.lib"
-        $pjlib_dest_renamed = "$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
+        $pjlib_expected_name = "libpjproject-i386-Win32-vc14-Release-Static.lib"
+        $pjlib_dest_renamed = "$microsip_lib_dir/$pjlib_expected_name"
         Copy-Item -Path $pjlib_source.FullName -Destination $pjlib_dest_renamed -Force
-        echo "Copied and Renamed $($pjlib_source.Name) to $pjlib_dest_renamed"
+        $pjlib_name = $pjlib_source.Name
+        echo "Copied and Renamed $pjlib_name to $pjlib_dest_renamed"
 
-    - name: 11. Generate Version Tag
+    - name: 10. Generate Version Tag
       id: generate_version
       working-directory: ./sufficit-microsip
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       
-    - name: 12. Build the final project
+    - name: 11. Build the final project
       working-directory: ./sufficit-microsip
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 13. Upload build artifact
+    - name: 12. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
