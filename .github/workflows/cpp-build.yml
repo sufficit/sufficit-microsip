@@ -1,32 +1,33 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 29 (Final - MSBuild Append Strategy)
+# WORKFLOW VERSION: 31 (Final - MSBuild Property Escape Fix)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 13, 2025
 # 
-# This is the most robust and correct way to solve this dependency issue.
+# This header should be updated keeping the same format on every interaction.
+# Static things and recomendations for AI:
 #
-# 1.  **Setup & Checkout**: Checks out all repositories.
-# 2.  **Configuration**: Copies `config_site.h`.
-# 3.  **Build Opus**: Compiles the Opus library first.
-# 4.  **Build PJSIP**: This is the key step. It calls `msbuild` telling it to use its
-#     existing `AdditionalIncludeDirectories` AND append the absolute path to the
-#     Opus include folder. This ensures all paths are present.
-# 5.  **Consolidate & Final Build**: Gathers all libraries and compiles MicroSIP.
-# 6.  **Artifact & Release**: Creates the final release.
-# =================================================================================================
+#  1º Comments in this file are always in english
+#  2º WORKFLOW VERSION has to be updated by each IA interatiction
+#  3º Bellow this section the AI should explain every success step on build proccess
+#  4º In Order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
+#   - `config_site.h`: used for includes and variables declarations
+#   - `patch.ps1`: powershell script (no longer used by this workflow)
+#  5º Do not change this header structure
+#
+# Above this line the should never forget.
+#
 # == Explanation of Build Steps ==
 #
-# This workflow ABANDONS the fragile `patch.ps1` script. The root cause of the errors was
-# that the script was overwriting the project's existing include paths.
-#
-# The definitive solution is to use the MSBuild command-line to APPEND the Opus include
-# path to the existing paths, rather than replacing them. This is achieved by passing:
-# /p:AdditionalIncludeDirectories="$(AdditionalIncludeDirectories);C:\path\to\opus"
-#
+# This workflow fixes an error where PowerShell would try to interpret an MSBuild
+# property `$(...)` as a command. The definitive fix is to escape the dollar sign
+# with a backtick (`$ -> `$) within the PowerShell script. This ensures the literal
+# string is passed to MSBuild, which then correctly appends the Opus include path.
+# =================================================================================================
+
 name: Build C++ and Create Release
 
 on:
@@ -78,14 +79,12 @@ jobs:
         # This is the definitive fix. We construct the absolute path to the Opus includes.
         $opus_include_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "opus-source/include"
         
-        # We then tell MSBuild to use its existing include directories AND append ours.
-        # The '$(AdditionalIncludeDirectories)' part is crucial - it preserves the original paths.
-        $new_include_dirs = "$(AdditionalIncludeDirectories);$opus_include_path"
-        
         Write-Host "Appending MSBuild include directories with: $opus_include_path"
         
-        # We no longer need the fragile patch.ps1 script.
-        msbuild.exe pjproject/pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories="$new_include_dirs"
+        # We tell MSBuild to use its existing include directories AND append ours.
+        # The '`$' is the crucial part: it escapes the dollar sign so that PowerShell
+        # passes the literal string "$(AdditionalIncludeDirectories)" to MSBuild for evaluation.
+        msbuild.exe pjproject/pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories="`$(AdditionalIncludeDirectories);$opus_include_path"
 
     - name: 8. Prepare Libraries for Final Build
       shell: pwsh
