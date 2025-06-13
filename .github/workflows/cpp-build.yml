@@ -1,17 +1,62 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 21 (Definitive "No-Move" Strategy)
+# WORKFLOW VERSION: 22 (Definitive "No-Move" Strategy)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 13, 2025
+# 
+# This header should be updated keeping the same format on every interaction.
+# Static things and recomendations for AI:
+# 1º Comments in this file are always in english
+# 2º WORKFLOW VERSION has to be updated by each IA interatiction
+# 3º Bellow this section the IA should explain every success step on build proccess
+# 
+# Above this line the should never forget.
 #
 # == Logic and Execution Steps ==
 #
 # This workflow ABANDONS all file-moving. It keeps each repository in its own clean
 # directory and uses relative paths and a final distribution folder to link everything.
 # It is self-contained and requires no pre-existing files in the repo besides the source.
+#
+# == Explanation of Build Steps ==
+#
+# 1.  **Setup & Checkout**: The workflow starts by setting up a Windows environment.
+#     It checks out the main `sufficit-microsip` repository and clones its two core
+#     dependencies, `pjproject` and `opus`, into separate sibling directories.
+#     - sufficit-microsip/
+#     - pjproject/
+#     - opus-source/
+#
+# 2.  **PJSIP Configuration**: A `config_site.h` file is dynamically created for PJSIP.
+#     This is a crucial step to enable specific features like IPv6 and various audio
+#     codecs (Opus, G.729, etc.) required by MicroSIP.
+#
+# 3.  **Dependency Build (Opus & PJSIP)**:
+#     - **Opus**: It's built first using CMake and "Visual Studio 17 2022". The resulting
+#       `opus.lib` file is placed in `opus-build/Release/`.
+#     - **PJSIP**: The PJSIP Visual Studio solution is then built using `msbuild`. The key
+#       part of this step is passing the `AdditionalIncludeDirectories` path pointing
+#       to the Opus source. This tells the PJSIP compiler where to find the Opus
+#       header files, resolving a common compilation dependency issue.
+#
+# 4.  **Library Consolidation**: To simplify the final linking stage, a central `dist/lib`
+#     directory is created. All the necessary library files (`.lib`) from both PJSIP
+#     and Opus are copied into this single location. This avoids complex relative
+#     path calculations in the final build command.
+#
+# 5.  **Final Application Build (MicroSIP)**: The workflow navigates into the
+#     `sufficit-microsip` directory and runs `msbuild` on the `microsip.vcxproj` file.
+#     It points the `AdditionalLibraryDirectories` to the `../dist/lib` folder created
+#     in the previous step. This allows the linker to find all the required PJSIP and
+#     Opus libraries to successfully build the final `microsip.exe`.
+#
+# 6.  **Artifact & Release**: The compiled `microsip.exe` is uploaded as a build artifact
+#     for debugging and archival. A parallel `release` job then downloads this artifact
+#     and creates a new, versioned GitHub Release, attaching the executable for easy
+#     distribution.
 # =================================================================================================
 
 name: Build C++ and Create Release
