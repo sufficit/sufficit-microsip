@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 32 (Final - Separated Build Script)
+# WORKFLOW VERSION: 33 (Fix PowerShell script execution)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -23,10 +23,9 @@
 #
 # == Explanation of Build Steps ==
 #
-# This workflow adopts the best practice of separating complex logic into its own
-# script. The complex MSBuild command is now in `scripts/build-pjsip.ps1`, making
-# the workflow YAML cleaner and more robust. This eliminates the need for character
-# escaping within the YAML file.
+# This workflow fixes a PowerShell error where it would not recognize the path to a script
+# as a runnable command. The solution is to use the PowerShell call operator `&` before
+# the script path. This explicitly tells PowerShell to execute the script.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -80,8 +79,8 @@ jobs:
         $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject/pjproject-vs14.sln"
         
         # Chama o script de build dedicado, passando os caminhos como parâmetros.
-        # Esta é uma abordagem muito mais limpa e robusta.
-        ./sufficit-microsip/scripts/build-pjsip.ps1 -OpusIncludePath $opus_path -SlnFile $sln_path
+        # O operador '&' é crucial para dizer ao PowerShell para executar o script.
+        & ./sufficit-microsip/scripts/build-pjsip.ps1 -OpusIncludePath $opus_path -SlnFile $sln_path
 
     - name: 8. Prepare Libraries for Final Build
       shell: pwsh
