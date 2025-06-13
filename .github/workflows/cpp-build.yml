@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 18 (Definitive External Files Strategy)
+# WORKFLOW VERSION: 18 (Definitive - One File Per Task)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -9,8 +9,9 @@
 #
 # == Logic and Execution Steps ==
 #
-# This workflow relies on `config_site.h` and `patch.ps1` existing in the repository root.
-# It uses a clean checkout structure and explicit commands to prevent all previous errors.
+# This workflow follows the "One File For Each Thing" principle rigorously.
+# Each complex task is encapsulated in its own script, generated and then executed.
+# This avoids all YAML syntax errors.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -26,68 +27,110 @@ jobs:
       version: ${{ steps.generate_version.outputs.VERSION }}
 
     steps:
-    - name: 1. Checkout Main Repo (with config and patch scripts)
+    - name: 1. Checkout Main Repository
       uses: actions/checkout@v4
 
-    - name: 2. Prepare Dependencies and Patch
+    - name: 2. Create Preparation and Patching Script
       shell: pwsh
       run: |
-        echo "Cloning PJSIP..."
+        @"
+        # Script para Preparar o Ambiente e Corrigir a PJSIP
+        
+        Write-Host "Cloning PJSIP..."
         git clone --depth 1 https://github.com/pjsip/pjproject.git
         
-        echo "Cloning Opus..."
+        Write-Host "Cloning Opus..."
         git clone --depth 1 https://github.com/xiph/opus.git ./pjproject/third_party/opus
 
-        echo "Restructuring PJSIP directories..."
-        # Move the contents of pjproject to the root, but exclude the .git directory to avoid conflicts.
+        Write-Host "Restructuring PJSIP directories..."
         Get-ChildItem -Path ./pjproject -Exclude .git | Move-Item -Destination ./
         Remove-Item -Path ./pjproject -Recurse -Force
         
-        echo "Copying config and executing patch..."
-        Copy-Item -Path ./config_site.h -Destination ./pjlib/include/pj/ -Force
-        ./patch.ps1
+        Write-Host "Creating config_site.h..."
+        `@"
+#define PJ_WIN32 1
+#include <windows.h>
+#define PJ_HAS_IPV6 1
+#define PJMEDIA_HAS_OPUS_CODEC 1
+#define PJMEDIA_OPUS_DEFAULT_BIT_RATE 32000
+#define PJ_LOG_MAX_LEVEL 4
+#define PJSUA_MAX_ACC 10
+#define PJSUA_MAX_CALLS 32
+`"@ | Set-Content -Path "./pjlib/include/pj/config_site.h"
+
+        Write-Host "Patching PJSIP project file..."
+        \$projFile = "./pjmedia/build/pjmedia-codec.vcxproj"
+        \$xml = [xml](Get-Content \$projFile)
+        \$targetCondition = "'`$(Configuration)`|`$(Platform)'=='Release|Win32'"
+        \$patched = \$false
+        foreach (\$group in \$xml.Project.ItemDefinitionGroup) {
+            if (\$group.Condition -eq \$targetCondition) {
+                Write-Host "Found 'Release|Win32' configuration. Patching..."
+                \$includeDirsNode = \$group.ClCompile.AdditionalIncludeDirectories
+                \$currentIncludes = \$includeDirsNode.'#text'
+                \$newIncludePath = ";../../third_party/opus/include"
+                if (\$currentIncludes -notlike "*\$newIncludePath*") {
+                    \$includeDirsNode.'#text' = \$currentIncludes + \$newIncludePath
+                }
+                \$patched = \$true
+                break
+            }
+        }
+        if (-not \$patched) {
+            Write-Host "FATAL: Could not find configuration to patch."
+            exit 1
+        }
+        \$xml.Save(\$projFile)
+        Write-Host "Patch successful."
+"@ | Set-Content -Path "1_prepare_and_patch.ps1"
+
+    - name: 3. Create Library Collection Script
+      shell: pwsh
+      run: |
+        @"
+        # Script para Coletar as Bibliotecas Compiladas
         
-    - name: 3. Add MSBuild to path
+        Write-Host "--- Preparing all required libraries for MicroSIP ---"
+        \$microsip_lib_dir = "./lib"
+        \$microsip_opus_dir = "./third_party/opus/Win32"
+        New-Item -ItemType Directory -Force -Path \$microsip_lib_dir
+        New-Item -ItemType Directory -Force -Path \$microsip_opus_dir
+        
+        \$opus_source_file = Get-Item "third_party/lib/libopus-*.lib"
+        Copy-Item -Path \$opus_source_file.FullName -Destination "\$microsip_opus_dir/opus.lib" -Force
+        
+        \$pjlib_source = Get-Item "lib/libpjproject-i386-Win32-vc14-Release.lib"
+        \$pjlib_dest_renamed = "\$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
+        Copy-Item -Path \$pjlib_source.FullName -Destination \$pjlib_dest_renamed -Force
+        
+        Write-Host "Library collection successful."
+"@ | Set-Content -Path "2_collect_libs.ps1"
+
+    - name: 4. Execute Preparation and Patching
+      run: ./1_prepare_and_patch.ps1
+      shell: pwsh
+        
+    - name: 5. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 4. Build Entire PJSIP Solution
-      shell: pwsh
-      run: |
-        echo "Building the entire PJSIP solution (pjproject-vs14.sln)..."
-        msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
+    - name: 6. Build Entire PJSIP Solution
+      run: msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
 
-    - name: 5. Prepare Libraries for Final Build
+    - name: 7. Execute Library Collection
+      run: ./2_collect_libs.ps1
       shell: pwsh
-      run: |
-        echo "--- Preparing all required libraries for MicroSIP ---"
-        # The project expects the libs in its own lib/ and third_party/ folders
-        $microsip_lib_dir = "./lib"
-        $microsip_opus_dir = "./third_party/opus/Win32"
-        New-Item -ItemType Directory -Force -Path $microsip_lib_dir
-        New-Item -ItemType Directory -Force -Path $microsip_opus_dir
         
-        # PJSIP's build created libopus in its own third_party/lib dir.
-        $opus_source_file = Get-Item "third_party/lib/libopus-*.lib"
-        Copy-Item -Path $opus_source_file.FullName -Destination "$microsip_opus_dir/opus.lib" -Force
-        echo "Copied $($opus_source_file.Name) to $microsip_opus_dir/opus.lib"
-
-        # PJSIP's build also created the main aggregated library.
-        $pjlib_source = Get-Item "lib/libpjproject-i386-Win32-vc14-Release.lib"
-        $pjlib_dest_renamed = "$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
-        Copy-Item -Path $pjlib_source.FullName -Destination $pjlib_dest_renamed -Force
-        echo "Copied and Renamed $($pjlib_source.Name) to $pjlib_dest_renamed"
-        
-    - name: 6. Generate Version Tag
+    - name: 8. Generate Version Tag
       id: generate_version
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       shell: pwsh
       
-    - name: 7. Build the final project
+    - name: 9. Build the final project
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 8. Upload build artifact
+    - name: 10. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
@@ -98,13 +141,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
     - name: 1. Download build artifact
       uses: actions/download-artifact@v4
       with:
         name: microsip-build
-
     - name: 2. Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
