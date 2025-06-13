@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 23 (Using local config and patch script)
+# WORKFLOW VERSION: 24 (Fixing path issue by reverting patch script)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -19,30 +19,28 @@
 #
 # == Explanation of Build Steps ==
 #
-# 1.  **Setup & Checkout**: The workflow checks out the main `sufficit-microsip` repository
-#     (which includes `config_site.h` and `patch.ps1`) and clones its dependencies,
-#     `pjproject` and `opus`, into separate directories.
+# This workflow fixes a path issue by removing the dependency on the `patch.ps1` script.
+# The script was failing because it couldn't find the project file to patch. The fix is to
+# revert to the more robust method of passing the Opus include directory directly to MSBuild.
 #
-# 2.  **PJSIP Configuration**: Instead of generating a file, it copies the `config_site.h`
-#     from your repository root directly into the PJSIP include directory. This ensures
-#     the build uses your committed configuration.
+# 1.  **Setup & Checkout**: Checks out the main repository and clones `pjproject` and `opus`.
 #
-# 3.  **PJSIP Patching**: The workflow runs the `patch.ps1` script. This script
-#     programmatically corrects the include paths within the PJSIP project files,
-#     ensuring it can find the Opus library headers. This is more precise than passing
-#     a global include path during the build.
+# 2.  **PJSIP Configuration**: Copies the `config_site.h` from the repository to the PJSIP
+#     include directory to ensure the correct features are enabled.
 #
-# 4.  **Dependency Build (Opus & PJSIP)**:
+# 3.  **Dependency Build (Opus & PJSIP)**:
 #     - **Opus**: Built first using CMake.
-#     - **PJSIP**: Built using `msbuild` after the configuration and patching steps are complete.
+#     - **PJSIP**: Built using `msbuild`. The `AdditionalIncludeDirectories` parameter is
+#       passed directly in the command line, which is a reliable way to ensure the PJSIP
+#       compiler finds the Opus header files. This replaces the failing patch script.
 #
-# 5.  **Library Consolidation**: A central `dist/lib` directory is created, and all
+# 4.  **Library Consolidation**: A central `dist/lib` directory is created, and all
 #     necessary `.lib` files from PJSIP and Opus are copied into it to simplify the final link.
 #
-# 6.  **Final Application Build (MicroSIP)**: The `microsip.vcxproj` is built, linking
+# 5.  **Final Application Build (MicroSIP)**: The `microsip.vcxproj` is built, linking
 #     against the libraries collected in the `dist/lib` directory.
 #
-# 7.  **Artifact & Release**: The final `microsip.exe` is uploaded as an artifact and then
+# 6.  **Artifact & Release**: The final `microsip.exe` is uploaded as an artifact and then
 #     used to create a versioned GitHub Release.
 # =================================================================================================
 
@@ -81,30 +79,23 @@ jobs:
       run: |
         Copy-Item -Path "sufficit-microsip/config_site.h" -Destination "pjproject/pjlib/include/pj/config_site.h"
         
-    - name: 5. Patch PJSIP Project File for Opus
-      shell: pwsh
-      working-directory: ./pjproject
-      run: |
-        # This script needs to be run from within the pjproject directory
-        # It references a file in the parent directory (sufficit-microsip)
-        ../sufficit-microsip/patch.ps1
-
-    - name: 6. Build Opus Library
+    - name: 5. Build Opus Library
       shell: pwsh
       run: |
         cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
         cmake --build opus-build --config Release
 
-    - name: 7. Add MSBuild to path
+    - name: 6. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 8. Build PJSIP Solution
+    - name: 7. Build PJSIP Solution
       shell: pwsh
       run: |
-        # The patch script has already fixed the include paths, so we no longer need to pass them here.
-        msbuild.exe pjproject/pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
+        # We pass the Opus include path directly to the compiler. 
+        # This is more robust than trying to patch the .vcxproj file.
+        msbuild.exe pjproject/pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories="../opus-source/include"
 
-    - name: 9. Prepare Libraries for Final Build
+    - name: 8. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Collecting all libraries for MicroSIP ---"
@@ -121,18 +112,18 @@ jobs:
         echo "Libraries collected in $dist_dir"
         Get-ChildItem $dist_dir
         
-    - name: 10. Generate Version Tag
+    - name: 9. Generate Version Tag
       id: generate_version
       shell: bash
       run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
       
-    - name: 11. Build the final project
+    - name: 10. Build the final project
       working-directory: ./sufficit-microsip
       run: |
-        # Build the main project, passing the absolute path to our library collection
+        # Build the main project, passing the library path to the linker.
         msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="../dist/lib"
 
-    - name: 12. Upload build artifact
+    - name: 11. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
