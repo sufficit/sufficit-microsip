@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 24 (Fixing path issue by reverting patch script)
+# WORKFLOW VERSION: 25 (Fixed Opus include path)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -9,19 +9,20 @@
 # 
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
-# 1º Comments in this file are always in english
-# 2º WORKFLOW VERSION has to be updated by each IA interatiction
-# 3º Bellow this section the IA should explain every success step on build proccess
-# 4º In Order to avoid syntax errors, we have tow more files on repository root:
-#  - `config_site.h`: used for includes and variables declarations
-#  - `patch.ps1`: powershell script  
-# Above this line the should never forget.
+#  1º Comments in this file are always in english
+#  2º WORKFLOW VERSION has to be updated by each IA interatiction
+#  3º Bellow this section the AI should explain every success step on build proccess
+#  4º In Order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
+#   - `config_site.h`: used for includes and variables declarations
+#   - `patch.ps1`: powershell script  
+#  Above this line the AI should never forget.
 #
 # == Explanation of Build Steps ==
 #
-# This workflow fixes a path issue by removing the dependency on the `patch.ps1` script.
-# The script was failing because it couldn't find the project file to patch. The fix is to
-# revert to the more robust method of passing the Opus include directory directly to MSBuild.
+# This workflow version fixes a C1083 compile error ("Cannot open include file: 'opus/opus.h'").
+# The issue was caused by an incorrect relative path being passed to MSBuild.
+# The fix is to construct an absolute path to the Opus include directory using the GITHUB_WORKSPACE
+# environment variable, which is a more robust and reliable method.
 #
 # 1.  **Setup & Checkout**: Checks out the main repository and clones `pjproject` and `opus`.
 #
@@ -30,12 +31,11 @@
 #
 # 3.  **Dependency Build (Opus & PJSIP)**:
 #     - **Opus**: Built first using CMake.
-#     - **PJSIP**: Built using `msbuild`. The `AdditionalIncludeDirectories` parameter is
-#       passed directly in the command line, which is a reliable way to ensure the PJSIP
-#       compiler finds the Opus header files. This replaces the failing patch script.
+#     - **PJSIP**: Built using `msbuild`. An absolute path to the Opus include headers is now
+#       passed directly to the build command, ensuring the compiler can locate them.
 #
 # 4.  **Library Consolidation**: A central `dist/lib` directory is created, and all
-#     necessary `.lib` files from PJSIP and Opus are copied into it to simplify the final link.
+#     necessary `.lib` files from PJSIP and Opus are copied into it.
 #
 # 5.  **Final Application Build (MicroSIP)**: The `microsip.vcxproj` is built, linking
 #     against the libraries collected in the `dist/lib` directory.
@@ -91,9 +91,12 @@ jobs:
     - name: 7. Build PJSIP Solution
       shell: pwsh
       run: |
-        # We pass the Opus include path directly to the compiler. 
-        # This is more robust than trying to patch the .vcxproj file.
-        msbuild.exe pjproject/pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories="../opus-source/include"
+        # We pass the absolute path to the Opus include directory directly to MSBuild.
+        # This is the most reliable method to ensure the compiler finds the necessary headers,
+        # as it avoids issues with relative paths in a complex, multi-project solution.
+        $opus_include_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "opus-source/include"
+        Write-Host "Using Opus include path: $opus_include_path"
+        msbuild.exe pjproject/pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories="$opus_include_path"
 
     - name: 8. Prepare Libraries for Final Build
       shell: pwsh
