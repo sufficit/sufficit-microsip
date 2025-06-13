@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 18 (Back to Basics, Corrected)
+# WORKFLOW VERSION: 17 (Final - Corrected External Files Strategy)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -9,9 +9,8 @@
 #
 # == Logic and Execution Steps ==
 #
-# This workflow returns to the most successful core strategy (independent Opus build)
-# and definitively fixes the final artifact copy steps using absolute paths.
-# All script logic is now self-contained.
+# This workflow relies on `config_site.h` and `patch.ps1` existing in the repository root.
+# It corrects the pathing and file conflict issues from all previous versions.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -27,116 +26,71 @@ jobs:
       version: ${{ steps.generate_version.outputs.VERSION }}
 
     steps:
-    - name: 1. Checkout MicroSip Repository
+    - name: 1. Checkout Main Repo with Scripts
       uses: actions/checkout@v4
-      with:
-        repository: sufficit/sufficit-microsip
-        path: sufficit-microsip
 
-    - name: 2. Clone PJSIP Repository
-      uses: actions/checkout@v4
-      with:
-        repository: pjsip/pjproject
-        path: pjproject
-    
-    - name: 3. Clone Opus Repository
-      uses: actions/checkout@v4
-      with:
-        repository: xiph/opus
-        path: opus-source
-
-    - name: 4. Restructure PJSIP directories
+    - name: 2. Prepare Dependencies and Patch
       shell: pwsh
       run: |
-        Move-Item -Path ${{ github.workspace }}/pjproject/* -Destination ${{ github.workspace }}/
-        Remove-Item -Path ${{ github.workspace }}/pjproject -Recurse -Force
+        echo "Cloning PJSIP..."
+        git clone --depth 1 https://github.com/pjsip/pjproject.git
 
-    - name: 5. Create PJSIP config_site.h
-      shell: pwsh
-      run: |
-        @"
-#define PJ_WIN32 1
-#include <windows.h>
-#define PJ_HAS_IPV6 1
-#define PJSUA_MAX_ACC 10
-#define PJSUA_MAX_CALLS 32
-#define PJMEDIA_HAS_G729_CODEC 1
-#define PJMEDIA_HAS_ILBC_CODEC 1
-#define PJMEDIA_HAS_SPEEX_CODEC 1
-#define PJMEDIA_HAS_SPEEX_AEC 1
-#define PJMEDIA_HAS_OPUS_CODEC 1
-#define PJMEDIA_HAS_VIDEO 0
-#define PJMEDIA_VIDEO_DEV_HAS_SDL 0
-#define PJMEDIA_VIDEO_DEV_HAS_DSHOW 0
-#define PJ_LOG_MAX_LEVEL 3
-#define PJMEDIA_AUD_MAX_DEVS 64
-#define PJMEDIA_OPUS_DEFAULT_BIT_RATE 32000
-"@ | Set-Content -Path "${{ github.workspace }}/pjlib/include/pj/config_site.h"
+        echo "Cloning Opus..."
+        git clone --depth 1 https://github.com/xiph/opus.git ./pjproject/third_party/opus
 
-    - name: 6. Add MSBuild to path
+        echo "Restructuring PJSIP directories..."
+        # Move the contents of pjproject to the root, but exclude the .git directory to avoid conflicts.
+        Get-ChildItem -Path ./pjproject -Exclude .git | Move-Item -Destination ./
+        Remove-Item -Path ./pjproject -Recurse -Force
+
+        echo "Copying config and executing patch..."
+        Copy-Item -Path ./config_site.h -Destination ./pjlib/include/pj/ -Force
+        ./patch.ps1
+
+    - name: 3. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 7. Build Opus Library (Independent)
+    - name: 4. Build Entire PJSIP Solution
       shell: pwsh
       run: |
-        echo "Building Opus with CMake..."
-        cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
-        cmake --build opus-build --config Release
+        echo "Building the entire PJSIP solution (pjproject-vs14.sln)..."
+        msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
 
-    - name: 8. Prepare Opus Artifacts for PJSIP
-      shell: pwsh
-      run: |
-        echo "Placing Opus headers and libraries for PJSIP build..."
-        New-Item -ItemType Directory -Force -Path "third_party/opus/include"
-        Copy-Item -Path opus-source/include/*.h -Destination third_party/opus/include/ -Recurse
-        
-        New-Item -ItemType Directory -Force -Path "third_party/lib"
-        Copy-Item -Path "opus-build/Release/opus.lib" -Destination "third_party/lib/libopus-i386-Win32-vc14-Release.lib"
-
-    - name: 9. Build PJSIP Libraries
-      shell: pwsh
-      continue-on-error: true
-      run: |
-        echo "Building the entire PJSIP solution..."
-        msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories="../../third_party/opus/include"
-
-    - name: 10. Prepare Libraries for Final Build
+    - name: 5. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Preparing all required libraries for MicroSIP ---"
-        $ws = "${{ github.workspace }}"
-        $microsip_project_dir = "$ws/sufficit-microsip"
-        
-        # Create destination directories inside the microsip project folder
-        New-Item -ItemType Directory -Force -Path "$microsip_project_dir/lib"
-        New-Item -ItemType Directory -Force -Path "$microsip_project_dir/third_party/opus/Win32"
+        # Since the main repo was checked out to the root, the destination is now just './'
+        $microsip_lib_dir = "./lib"
+        $microsip_opus_dir = "./third_party/opus/Win32"
+        New-Item -ItemType Directory -Force -Path $microsip_lib_dir
+        New-Item -ItemType Directory -Force -Path $microsip_opus_dir
 
-        # Copy the independently-built opus.lib
-        Copy-Item -Path "$ws/opus-build/Release/opus.lib" -Destination "$microsip_project_dir/third_party/opus/Win32/"
-        echo "Copied opus.lib for MicroSIP."
+        $opus_source_file = Get-Item "third_party/lib/libopus-*.lib"
+        Copy-Item -Path $opus_source_file.FullName -Destination "$microsip_opus_dir/opus.lib" -Force
+        echo "Copied $($opus_source_file.Name) to $microsip_opus_dir/opus.lib"
 
-        # Copy the main aggregated PJSIP library and RENAME it to the static version
-        $pjlib_source = Get-Item "$ws/lib/libpjproject-i386-Win32-vc14-Release.lib"
-        $pjlib_dest_renamed = "$microsip_project_dir/lib/libpjproject-i386-Win32-vc14-Release-Static.lib"
+        $pjlib_source = Get-Item "lib/libpjproject-i386-Win32-vc14-Release.lib"
+        $pjlib_expected_name = "libpjproject-i386-Win32-vc14-Release-Static.lib"
+        $pjlib_dest_renamed = "$microsip_lib_dir/$pjlib_expected_name"
         Copy-Item -Path $pjlib_source.FullName -Destination $pjlib_dest_renamed -Force
-        echo "Copied and Renamed main PJSIP library."
-      
-    - name: 11. Generate Version Tag
+        echo "Copied and Renamed $($pjlib_source.Name) to $pjlib_dest_renamed"
+
+    - name: 6. Generate Version Tag
       id: generate_version
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       shell: pwsh
-      
-    - name: 12. Build the final project
-      working-directory: ./sufficit-microsip
+
+    - name: 7. Build the final project
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 13. Upload build artifact
+    - name: 8. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
-        path: sufficit-microsip/Release/microsip.exe
+        path: Release/microsip.exe
 
   release:
     needs: build
