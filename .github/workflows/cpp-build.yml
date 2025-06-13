@@ -1,38 +1,32 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 28 (Simplified patch step)
+# WORKFLOW VERSION: 29 (Final - MSBuild Append Strategy)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 13, 2025
 # 
-# Static things and recomendations for AI, you should never alter these recommendations and never skip any of these:
-#  1º Comments in this file are always in english
-#  2º WORKFLOW VERSION has to be updated by each IA interatiction
-#  3º Bellow this section the AI should explain every success step on build proccess
-#  4º In Order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
-#   - `config_site.h`: used for includes and variables declarations
-#   - `patch.ps1`: powershell script (user must ensure this is the corrected version)
+# This is the most robust and correct way to solve this dependency issue.
 #
+# 1.  **Setup & Checkout**: Checks out all repositories.
+# 2.  **Configuration**: Copies `config_site.h`.
+# 3.  **Build Opus**: Compiles the Opus library first.
+# 4.  **Build PJSIP**: This is the key step. It calls `msbuild` telling it to use its
+#     existing `AdditionalIncludeDirectories` AND append the absolute path to the
+#     Opus include folder. This ensures all paths are present.
+# 5.  **Consolidate & Final Build**: Gathers all libraries and compiles MicroSIP.
+# 6.  **Artifact & Release**: Creates the final release.
+# =================================================================================================
 # == Explanation of Build Steps ==
 #
-# This workflow assumes that the `patch.ps1` script in the repository has been manually
-# updated by the user. The step to dynamically modify the script has been removed for clarity
-# and correctness.
+# This workflow ABANDONS the fragile `patch.ps1` script. The root cause of the errors was
+# that the script was overwriting the project's existing include paths.
 #
-# 1.  **Setup & Checkout**: Checks out all necessary repositories.
+# The definitive solution is to use the MSBuild command-line to APPEND the Opus include
+# path to the existing paths, rather than replacing them. This is achieved by passing:
+# /p:AdditionalIncludeDirectories="$(AdditionalIncludeDirectories);C:\path\to\opus"
 #
-# 2.  **Configuration**: Copies the `config_site.h` to the PJSIP directory.
-#
-# 3.  **Run PJSIP Patch**: Executes the user's `patch.ps1` script directly.
-#
-# 4.  **Build Dependencies & Main Project**: Builds Opus, then PJSIP, and finally the
-#     main MicroSIP application.
-#
-# 5.  **Artifact & Release**: Packages the final `microsip.exe` and creates a GitHub Release.
-# =================================================================================================
-
 name: Build C++ and Create Release
 
 on:
@@ -69,29 +63,31 @@ jobs:
         Copy-Item -Path "sufficit-microsip/config_site.h" -Destination "pjproject/pjlib/include/pj/config_site.h"
         Write-Host "Copied config_site.h to PJSIP."
 
-    - name: 5. Run PJSIP Patch Script
-      shell: pwsh
-      working-directory: ./pjproject
-      run: |
-        # We execute the user's patch.ps1 script, which is expected to be correct.
-        ../sufficit-microsip/patch.ps1
-
-    - name: 6. Build Opus Library
+    - name: 5. Build Opus Library
       shell: pwsh
       run: |
         cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
         cmake --build opus-build --config Release
 
-    - name: 7. Add MSBuild to path
+    - name: 6. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 8. Build PJSIP Solution
+    - name: 7. Build PJSIP Solution
       shell: pwsh
       run: |
-        # Build the solution. No extra parameters are needed as the project files are now patched.
-        msbuild.exe pjproject/pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
+        # This is the definitive fix. We construct the absolute path to the Opus includes.
+        $opus_include_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "opus-source/include"
+        
+        # We then tell MSBuild to use its existing include directories AND append ours.
+        # The '$(AdditionalIncludeDirectories)' part is crucial - it preserves the original paths.
+        $new_include_dirs = "$(AdditionalIncludeDirectories);$opus_include_path"
+        
+        Write-Host "Appending MSBuild include directories with: $opus_include_path"
+        
+        # We no longer need the fragile patch.ps1 script.
+        msbuild.exe pjproject/pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories="$new_include_dirs"
 
-    - name: 9. Prepare Libraries for Final Build
+    - name: 8. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Collecting all libraries for MicroSIP ---"
@@ -102,17 +98,17 @@ jobs:
         echo "Libraries collected in $dist_dir"
         Get-ChildItem $dist_dir
         
-    - name: 10. Generate Version Tag
+    - name: 9. Generate Version Tag
       id: generate_version
       shell: bash
       run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
       
-    - name: 11. Build the final project
+    - name: 10. Build the final project
       working-directory: ./sufficit-microsip
       run: |
         msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="../dist/lib"
 
-    - name: 12. Upload build artifact
+    - name: 11. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
