@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 20 (Definitive Fix - Copy-Item instead of Move-Item)
+# WORKFLOW VERSION: 21 (Definitive Fix for YAML Expression Parsing)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -9,9 +9,8 @@
 #
 # == Logic and Execution Steps ==
 #
-# This workflow uses the user-preferred external script method.
-# It fixes all previous errors by using `Copy-Item` to merge the PJSIP directory
-# into the workspace root, which avoids all file/directory conflicts.
+# This workflow uses the user-provided external scripts and fixes the final YAML parsing
+# error by switching the shell to BASH for the version-generation step, avoiding syntax conflicts.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -40,7 +39,7 @@ jobs:
         git clone --depth 1 https://github.com/xiph/opus.git ./pjproject/third_party/opus
 
         echo "Merging PJSIP files into workspace root..."
-        # THE FIX: Use Copy-Item to merge directories instead of Move-Item, avoiding conflicts.
+        # THE FIX: Use Copy-Item to merge directories, which avoids conflicts.
         Copy-Item -Path ./pjproject/* -Destination ./ -Recurse -Force
         Copy-Item -Path ./pjproject/.* -Destination ./ -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path ./pjproject -Recurse -Force
@@ -62,21 +61,50 @@ jobs:
       shell: pwsh
       run: |
         echo "--- Preparing all required libraries for MicroSIP ---"
-        $microsip_lib_dir = "./lib"
-        $microsip_opus_dir = "./third_party/opus/Win32"
-        New-Item -ItemType Directory -Force -Path $microsip_lib_dir
-        New-Item -ItemType Directory -Force -Path $microsip_opus_dir
+        New-Item -ItemType Directory -Force -Path "./lib"
+        New-Item -ItemType Directory -Force -Path "./third_party/opus/Win32"
         
         $opus_source_file = Get-Item "third_party/lib/libopus-*.lib"
-        Copy-Item -Path $opus_source_file.FullName -Destination "$microsip_opus_dir/opus.lib" -Force
+        Copy-Item -Path $opus_source_file.FullName -Destination "./third_party/opus/Win32/opus.lib" -Force
         
         $pjlib_source = Get-Item "lib/libpjproject-i386-Win32-vc14-Release.lib"
-        $pjlib_dest_renamed = "$microsip_lib_dir/libpjproject-i386-Win32-vc14-Release-Static.lib"
+        $pjlib_dest_renamed = "./lib/libpjproject-i386-Win32-vc14-Release-Static.lib"
         Copy-Item -Path $pjlib_source.FullName -Destination $pjlib_dest_renamed -Force
         
         Write-Host "Library collection successful."
         
     - name: 6. Generate Version Tag
       id: generate_version
-      run: |
-        <span class="math-inline">VERSION\="v</span>(Get-Date -Format 'yyyy.MM.dd').${{ github
+      # Using BASH shell for this step is safer because its syntax does not conflict with GitHub's ${{...}} expressions.
+      shell: bash
+      run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
+      
+    - name: 7. Build the final project
+      run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
+
+    - name: 8. Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: microsip-build
+        path: Release/microsip.exe
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: 1. Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: microsip-build
+
+    - name: 2. Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ needs.build.outputs.version }}
+        name: "Release ${{ needs.build.outputs.version }}"
+        body: |
+          Versão compilada automaticamente a partir do último push para a branch main.
+        files: microsip.exe
