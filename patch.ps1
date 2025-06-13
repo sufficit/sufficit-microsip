@@ -1,12 +1,11 @@
 # Este script corrige o arquivo de projeto da PJSIP que possui um caminho de inclusão quebrado para o Opus.
-# Versão 2 - Corrigido para lidar com nós XML vazios ou inexistentes.
+# Versão 3 - Versão mais robusta usando SelectSingleNode para garantir a existência dos elementos XML.
 
 $projFile = "./pjmedia/build/pjmedia_codec.vcxproj"
 Write-Host "Loading project file to patch: $projFile"
 
 # Carrega o conteúdo do arquivo XML
-# O [System.Xml.XmlDocument] é mais robusto que [xml] para manipulação.
-$xml = [System.Xml.XmlDocument](Get-Content $projFile)
+$xml = [xml](Get-Content $projFile)
 
 # Define a string exata da condição que queremos encontrar.
 $targetCondition = "'`$(Configuration)`|`$(Platform)'=='Release|Win32'"
@@ -19,28 +18,27 @@ foreach ($group in $xml.Project.ItemDefinitionGroup) {
     if ($group.Condition -eq $targetCondition) {
         Write-Host "Found 'Release|Win32' configuration. Patching..."
         
-        # Navega até o nó <ClCompile>
-        $clCompileNode = $group.ClCompile
+        # --- INÍCIO DA CORREÇÃO ROBUSTA ---
+        # Garante que o nó <ClCompile> exista.
+        $clCompileNode = $group.SelectSingleNode("ClCompile")
         if ($null -eq $clCompileNode) {
             Write-Host "ClCompile node not found. Creating it."
-            $clCompileNode = $xml.CreateElement("ClCompile", $xml.DocumentElement.NamespaceURI)
+            # Usa o namespace do elemento pai para criar o novo nó
+            $clCompileNode = $xml.CreateElement("ClCompile", $group.NamespaceURI)
             $group.AppendChild($clCompileNode) | Out-Null
         }
         
-        # --- INÍCIO DA CORREÇÃO ---
-        # Verifica se o nó <AdditionalIncludeDirectories> existe. Se não, cria.
-        $includeDirsNode = $clCompileNode.AdditionalIncludeDirectories
+        # Garante que o nó <AdditionalIncludeDirectories> exista dentro de <ClCompile>.
+        $includeDirsNode = $clCompileNode.SelectSingleNode("AdditionalIncludeDirectories")
         if ($null -eq $includeDirsNode) {
             Write-Host "Creating missing 'AdditionalIncludeDirectories' node."
-            $includeDirsNode = $xml.CreateElement("AdditionalIncludeDirectories", $xml.DocumentElement.NamespaceURI)
+            $includeDirsNode = $xml.CreateElement("AdditionalIncludeDirectories", $clCompileNode.NamespaceURI)
             $clCompileNode.AppendChild($includeDirsNode) | Out-Null
         }
-        
-        # Pega o valor atual usando InnerText, que é mais seguro
+        # --- FIM DA CORREÇÃO ROBUSTA ---
+
+        # Agora que temos certeza de que o nó existe, podemos modificá-lo com segurança.
         $currentIncludes = $includeDirsNode.InnerText
-        # --- FIM DA CORREÇÃO ---
-        
-        # Adiciona o caminho que falta para os headers do Opus
         $newIncludePath = ";../../opus-source/include"
         
         # Verifica se o patch já não foi aplicado para evitar duplicatas
