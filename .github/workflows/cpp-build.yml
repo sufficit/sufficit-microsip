@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 33 (Fix PowerShell script execution)
+# WORKFLOW VERSION: 34 (Fix script path resolution)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -18,14 +18,16 @@
 #   - `patch.ps1`: powershell script (no longer used by this workflow)
 #   - `build_pjsip.ps1`
 #  5º Do not change this header structure
+#  6º Use & operator to call powershell scripts
+#  7º Everytime you need to escape something, evaluate the ideia of create another file for that
 #
 # Above this line the should never forget.
 #
 # == Explanation of Build Steps ==
 #
-# This workflow fixes a PowerShell error where it would not recognize the path to a script
-# as a runnable command. The solution is to use the PowerShell call operator `&` before
-# the script path. This explicitly tells PowerShell to execute the script.
+# This workflow fixes a path resolution error by using an absolute path to the build script.
+# Instead of relying on a relative path, it constructs the full path using the
+# `GITHUB_WORKSPACE` environment variable, which is a more robust method.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -74,13 +76,15 @@ jobs:
     - name: 7. Build PJSIP Solution
       shell: pwsh
       run: |
-        # Define os caminhos necessários
+        # Define os caminhos absolutos para todos os artefatos necessários
         $opus_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "opus-source/include"
         $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject/pjproject-vs14.sln"
+        $script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "sufficit-microsip/scripts/build-pjsip.ps1"
         
-        # Chama o script de build dedicado, passando os caminhos como parâmetros.
-        # O operador '&' é crucial para dizer ao PowerShell para executar o script.
-        & ./sufficit-microsip/scripts/build-pjsip.ps1 -OpusIncludePath $opus_path -SlnFile $sln_path
+        Write-Host "Caminho do Script: $script_path"
+        
+        # Chama o script de build usando seu caminho absoluto para garantir a resolução.
+        & $script_path -OpusIncludePath $opus_path -SlnFile $sln_path
 
     - name: 8. Prepare Libraries for Final Build
       shell: pwsh
