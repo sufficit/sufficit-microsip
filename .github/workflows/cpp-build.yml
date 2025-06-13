@@ -1,18 +1,22 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 16 (Final - External Files)
+# WORKFLOW VERSION: 17 (Final Path Correction)
+#
+# Author: Hugo Castro de Deco, Sufficit
+# Collaboration: Gemini AI for Google
+# Date: June 12, 2025
 #
 # == Logic and Execution Steps (Final Reviewed Version) ==
 #
-# This workflow is now radically simplified to be 100% YAML-syntax-safe. It relies on
-# the `config_site.h` and `patch.ps1` files existing in the repository.
+# This workflow relies on `config_site.h` and `patch.ps1` existing in the repository root.
+# It corrects the pathing issue from v16 where the scripts could not be found.
 #
-# 1.  **Setup (Steps 1-3):** Checks out all sources.
-# 2.  **Patch (Step 4):** Executes the `patch.ps1` script from the repository root, which fixes
-#     the broken PJSIP project file.
-# 3.  **Build PJSIP (Step 6):** Builds the entire, now-corrected, PJSIP solution.
-# 4.  **Finalize (Steps 7-12):** Copies all necessary libraries and builds the final project.
+# 1.  **Setup (Steps 1-3):** Standard checkout.
+# 2.  **Restructure (Step 4):** Moves PJSIP sources to the root.
+# 3.  **Prepare & Patch (Step 5):** Copies the config and patch scripts from the checked-out
+#     repository into their required locations and then executes the patch. This is the key fix.
+# 4.  **Build & Finalize (Steps 6-13):** The rest of the workflow proceeds as planned.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -46,28 +50,32 @@ jobs:
         repository: xiph/opus
         path: pjproject/third_party/opus
 
-    - name: 4. Execute PJSIP Patch Script
+    - name: 4. Restructure PJSIP directories
       shell: pwsh
       run: |
-        # Move PJSIP sources to the root to match the solution's relative paths
-        Move-Item -Path ${{ github.workspace }}\pjproject\* -Destination ${{ github.workspace }}\
-        Remove-Item -Path ${{ github.workspace }}\pjproject -Recurse -Force
-        # Copy the pre-made config and patch files into the correct locations
-        Copy-Item -Path sufficit-microsip/patch.ps1 -Destination ./
-        Copy-Item -Path sufficit-microsip/config_site.h -Destination pjlib/include/pj/
-        # Execute the patch script
+        Move-Item -Path ${{ github.workspace }}/pjproject/* -Destination ${{ github.workspace }}/
+        Remove-Item -Path ${{ github.workspace }}/pjproject -Recurse -Force
+
+    - name: 5. Prepare and Execute PJSIP Patch
+      shell: pwsh
+      run: |
+        echo "Copying config and patch files..."
+        Copy-Item -Path sufficit-microsip/config_site.h -Destination pjlib/include/pj/ -Force
+        Copy-Item -Path sufficit-microsip/patch.ps1 -Destination ./ -Force
+        
+        echo "Executing patch script..."
         ./patch.ps1
         
-    - name: 5. Add MSBuild to path
+    - name: 6. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 6. Build Entire PJSIP Solution
+    - name: 7. Build Entire PJSIP Solution
       shell: pwsh
       run: |
         echo "Building the entire PJSIP solution (pjproject-vs14.sln)..."
         msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
 
-    - name: 7. Prepare Libraries for Final Build
+    - name: 8. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Preparing all required libraries for MicroSIP ---"
@@ -88,18 +96,18 @@ jobs:
         $pjlib_name = $pjlib_source.Name
         echo "Copied and Renamed $pjlib_name to $pjlib_dest_renamed"
 
-    - name: 8. Generate Version Tag
+    - name: 9. Generate Version Tag
       id: generate_version
       working-directory: ./sufficit-microsip
       run: |
         $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
         echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       
-    - name: 9. Build the final project
+    - name: 10. Build the final project
       working-directory: ./sufficit-microsip
       run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
 
-    - name: 10. Upload build artifact
+    - name: 11. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
