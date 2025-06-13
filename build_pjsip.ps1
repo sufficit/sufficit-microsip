@@ -1,4 +1,4 @@
-# scripts/build-pjsip.ps1
+# scripts/build_pjsip.ps1
 #
 # Este script compila a solução PJSIP, adicionando de forma robusta
 # o caminho de inclusão para a biblioteca Opus.

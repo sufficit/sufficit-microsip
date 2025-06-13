@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 35 (Final - Simplified Pathing)
+# WORKFLOW VERSION: 37 (Final - Simplified Pathing and Correct Script Call)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -15,17 +15,16 @@
 #  3º Bellow this section the AI should explain every success step on build proccess
 #  4º In Order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
 #   - `config_site.h`: used for includes and variables declarations
-#   - `patch.ps1`: powershell script (no longer used by this workflow)
-#   - `build_pjsip.ps1`
+#   - `scripts/build_pjsip.ps1`: the definitive build script (with underscore)
 #  5º Do not change this header structure
 #
 # Above this line the should never forget.
 #
 # == Explanation of Build Steps ==
 #
-# This workflow fixes all path resolution errors by simplifying the directory structure.
-# The main repository is now checked out to the workspace root, eliminating nested
-# directories and making all subsequent paths straightforward and reliable.
+# This workflow is the definitive version. It uses a separate script for the PJSIP
+# build and has simplified, robust pathing by checking out the main repo to the root
+# of the workspace. This avoids all previous path resolution and script execution errors.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -43,7 +42,7 @@ jobs:
     steps:
     - name: 1. Checkout Main Repository to root
       uses: actions/checkout@v4
-      # By not specifying a 'path', the repo is checked out to the workspace root, simplifying all paths.
+      # By not specifying a 'path', the repo is checked out to the workspace root, simplifying all subsequent paths.
 
     - name: 2. Clone PJSIP Repository
       uses: actions/checkout@v4
@@ -76,11 +75,11 @@ jobs:
         # Define os caminhos absolutos, agora a partir da raiz do workspace.
         $opus_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "opus-source/include"
         $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject/pjproject-vs14.sln"
-        $script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/build-pjsip.ps1"
+        $script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/build_pjsip.ps1"
         
         Write-Host "Executando o script: $script_path"
         
-        # Chama o script de build usando seu caminho absoluto.
+        # Chama o script de build usando seu caminho absoluto e o operador de chamada '&'.
         & $script_path -OpusIncludePath $opus_path -SlnFile $sln_path
 
     - name: 8. Prepare Libraries for Final Build
@@ -99,12 +98,14 @@ jobs:
       
     - name: 10. Build the final project
       shell: pwsh
+      # Agora executamos a partir da raiz, pois o checkout foi simplificado.
       run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="./dist/lib"
 
     - name: 11. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
+        # O caminho para o artefato também é mais simples agora.
         path: Release/microsip.exe
 
   release:
