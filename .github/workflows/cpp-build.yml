@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 31 (Final - MSBuild Property Escape Fix)
+# WORKFLOW VERSION: 32 (Final - Separated Build Script)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -16,16 +16,17 @@
 #  4º In Order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
 #   - `config_site.h`: used for includes and variables declarations
 #   - `patch.ps1`: powershell script (no longer used by this workflow)
+#   - `build_pjsip.ps1`
 #  5º Do not change this header structure
 #
 # Above this line the should never forget.
 #
 # == Explanation of Build Steps ==
 #
-# This workflow fixes an error where PowerShell would try to interpret an MSBuild
-# property `$(...)` as a command. The definitive fix is to escape the dollar sign
-# with a backtick (`$ -> `$) within the PowerShell script. This ensures the literal
-# string is passed to MSBuild, which then correctly appends the Opus include path.
+# This workflow adopts the best practice of separating complex logic into its own
+# script. The complex MSBuild command is now in `scripts/build-pjsip.ps1`, making
+# the workflow YAML cleaner and more robust. This eliminates the need for character
+# escaping within the YAML file.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -60,9 +61,7 @@ jobs:
 
     - name: 4. Copy PJSIP config_site.h
       shell: pwsh
-      run: |
-        Copy-Item -Path "sufficit-microsip/config_site.h" -Destination "pjproject/pjlib/include/pj/config_site.h"
-        Write-Host "Copied config_site.h to PJSIP."
+      run: Copy-Item -Path "sufficit-microsip/config_site.h" -Destination "pjproject/pjlib/include/pj/config_site.h"
 
     - name: 5. Build Opus Library
       shell: pwsh
@@ -76,15 +75,13 @@ jobs:
     - name: 7. Build PJSIP Solution
       shell: pwsh
       run: |
-        # This is the definitive fix. We construct the absolute path to the Opus includes.
-        $opus_include_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "opus-source/include"
+        # Define os caminhos necessários
+        $opus_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "opus-source/include"
+        $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject/pjproject-vs14.sln"
         
-        Write-Host "Appending MSBuild include directories with: $opus_include_path"
-        
-        # We tell MSBuild to use its existing include directories AND append ours.
-        # The '`$' is the crucial part: it escapes the dollar sign so that PowerShell
-        # passes the literal string "$(AdditionalIncludeDirectories)" to MSBuild for evaluation.
-        msbuild.exe pjproject/pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories="`$(AdditionalIncludeDirectories);$opus_include_path"
+        # Chama o script de build dedicado, passando os caminhos como parâmetros.
+        # Esta é uma abordagem muito mais limpa e robusta.
+        ./sufficit-microsip/scripts/build-pjsip.ps1 -OpusIncludePath $opus_path -SlnFile $sln_path
 
     - name: 8. Prepare Libraries for Final Build
       shell: pwsh
@@ -94,8 +91,6 @@ jobs:
         New-Item -ItemType Directory -Force -Path $dist_dir
         Copy-Item -Path pjproject/lib/*.lib -Destination $dist_dir
         Copy-Item -Path opus-build/Release/opus.lib -Destination $dist_dir
-        echo "Libraries collected in $dist_dir"
-        Get-ChildItem $dist_dir
         
     - name: 9. Generate Version Tag
       id: generate_version
@@ -104,8 +99,7 @@ jobs:
       
     - name: 10. Build the final project
       working-directory: ./sufficit-microsip
-      run: |
-        msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="../dist/lib"
+      run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="../dist/lib"
 
     - name: 11. Upload build artifact
       uses: actions/upload-artifact@v4
