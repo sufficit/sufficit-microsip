@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 21 (Definitive Fix for YAML Expression Parsing)
+# WORKFLOW VERSION: 22 (Definitive "No-Move" Strategy, Corrected Paths)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -9,8 +9,9 @@
 #
 # == Logic and Execution Steps ==
 #
-# This workflow uses the user-provided external scripts and fixes the final YAML parsing
-# error by switching the shell to BASH for the version-generation step, avoiding syntax conflicts.
+# This workflow ABANDONS all file-moving. It keeps each repository in its own clean
+# directory and uses relative paths and a final distribution folder to link everything.
+# It uses the user-provided patch.ps1 and config_site.h files.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -26,67 +27,84 @@ jobs:
       version: ${{ steps.generate_version.outputs.VERSION }}
 
     steps:
-    - name: 1. Checkout Main Repo & Scripts
+    - name: 1. Checkout Main Repository & Scripts
       uses: actions/checkout@v4
+      with:
+        path: sufficit-microsip
 
-    - name: 2. Prepare Dependencies and Patch
+    - name: 2. Clone PJSIP Repository
+      uses: actions/checkout@v4
+      with:
+        repository: pjsip/pjproject
+        path: pjproject
+    
+    - name: 3. Clone Opus Repository
+      uses: actions/checkout@v4
+      with:
+        repository: xiph/opus
+        path: opus-source
+
+    - name: 4. Prepare PJSIP Dependencies and Patch Script
       shell: pwsh
       run: |
-        echo "Cloning PJSIP..."
-        git clone --depth 1 https://github.com/pjsip/pjproject.git
+        # Copy the user's config_site.h and patch.ps1 from the main repo checkout
+        # into the pjproject directory where they will be used.
+        Copy-Item -Path "${{ github.workspace }}/sufficit-microsip/config_site.h" -Destination "${{ github.workspace }}/pjproject/pjlib/include/pj/" -Force
+        Copy-Item -Path "${{ github.workspace }}/sufficit-microsip/patch.ps1" -Destination "${{ github.workspace }}/pjproject/" -Force
         
-        echo "Cloning Opus..."
-        git clone --depth 1 https://github.com/xiph/opus.git ./pjproject/third_party/opus
-
-        echo "Merging PJSIP files into workspace root..."
-        # THE FIX: Use Copy-Item to merge directories, which avoids conflicts.
-        Copy-Item -Path ./pjproject/* -Destination ./ -Recurse -Force
-        Copy-Item -Path ./pjproject/.* -Destination ./ -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path ./pjproject -Recurse -Force
+    - name: 5. Execute PJSIP Patch Script
+      working-directory: ./pjproject
+      shell: pwsh
+      run: ./patch.ps1
         
-        echo "Copying config file and executing patch script..."
-        Copy-Item -Path ./config_site.h -Destination ./pjlib/include/pj/ -Force
-        ./patch.ps1
-        
-    - name: 3. Add MSBuild to path
+    - name: 6. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 4. Build Entire PJSIP Solution
+    - name: 7. Build Entire PJSIP Solution
+      working-directory: ./pjproject
       shell: pwsh
       run: |
-        echo "Building the entire PJSIP solution..."
-        msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32
+        # Pass the opus include path directly to MSBuild. This avoids patching project files.
+        # The path is relative from the pjproject directory.
+        msbuild.exe pjproject-vs14.sln /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories="../opus-source/include"
 
-    - name: 5. Prepare Libraries for Final Build
+    - name: 8. Prepare Libraries for Final Build
       shell: pwsh
       run: |
-        echo "--- Preparing all required libraries for MicroSIP ---"
-        New-Item -ItemType Directory -Force -Path "./lib"
-        New-Item -ItemType Directory -Force -Path "./third_party/opus/Win32"
+        $ws = "${{ github.workspace }}"
+        $microsip_project_dir = "$ws/sufficit-microsip"
         
-        $opus_source_file = Get-Item "third_party/lib/libopus-*.lib"
-        Copy-Item -Path $opus_source_file.FullName -Destination "./third_party/opus/Win32/opus.lib" -Force
+        New-Item -ItemType Directory -Force -Path "$microsip_project_dir/lib"
+        New-Item -ItemType Directory -Force -Path "$microsip_project_dir/third_party/opus/Win32"
+
+        # PJSIP's build created libopus in its own third_party/lib dir. Copy it.
+        $opus_source_file = Get-Item "$ws/pjproject/third_party/lib/libopus-*.lib"
+        Copy-Item -Path $opus_source_file.FullName -Destination "$microsip_project_dir/third_party/opus/Win32/opus.lib" -Force
         
-        $pjlib_source = Get-Item "lib/libpjproject-i386-Win32-vc14-Release.lib"
-        $pjlib_dest_renamed = "./lib/libpjproject-i386-Win32-vc14-Release-Static.lib"
+        # PJSIP's build also created the main aggregated library. Copy and rename it.
+        $pjlib_source = Get-Item "$ws/pjproject/lib/libpjproject-i386-Win32-vc14-Release.lib"
+        $pjlib_dest_renamed = "$microsip_project_dir/lib/libpjproject-i386-Win32-vc14-Release-Static.lib"
         Copy-Item -Path $pjlib_source.FullName -Destination $pjlib_dest_renamed -Force
         
         Write-Host "Library collection successful."
         
-    - name: 6. Generate Version Tag
+    - name: 9. Generate Version Tag
       id: generate_version
-      # Using BASH shell for this step is safer because its syntax does not conflict with GitHub's ${{...}} expressions.
-      shell: bash
-      run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
+      working-directory: ./sufficit-microsip
+      run: |
+        $VERSION="v$(Get-Date -Format 'yyyy.MM.dd').${{ github.run_number }}"
+        echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      shell: pwsh
       
-    - name: 7. Build the final project
-      run: msbuild.exe /p:Configuration=Release /p:Platform=x86 microsip.vcxproj
+    - name: 10. Build the final project
+      working-directory: ./sufficit-microsip
+      run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86
 
-    - name: 8. Upload build artifact
+    - name: 11. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
-        path: Release/microsip.exe
+        path: sufficit-microsip/Release/microsip.exe
 
   release:
     needs: build
