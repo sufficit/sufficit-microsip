@@ -1,6 +1,7 @@
 # Este script corrige o arquivo de projeto da PJSIP que possui um caminho de inclusão quebrado para o Opus.
+# Versão 2 - Corrigido para lidar com nós XML vazios ou inexistentes.
 
-$projFile = "./pjmedia/build/pjmedia-codec.vcxproj"
+$projFile = "./pjmedia/build/pjmedia_codec.vcxproj"
 Write-Host "Loading project file to patch: $projFile"
 
 # Carrega o conteúdo do arquivo XML
@@ -18,18 +19,30 @@ foreach ($group in $xml.Project.ItemDefinitionGroup) {
     if ($group.Condition -eq $targetCondition) {
         Write-Host "Found 'Release|Win32' configuration. Patching..."
         
-        # Navega até o nó dos diretórios de inclusão
-        $includeDirsNode = $group.ClCompile.AdditionalIncludeDirectories
+        # Navega até o nó <ClCompile>
+        $clCompileNode = $group.ClCompile
         
-        # Pega o valor atual
-        $currentIncludes = $includeDirsNode.'#text'
+        # --- INÍCIO DA CORREÇÃO ---
+        # Verifica se o nó <AdditionalIncludeDirectories> existe. Se não, cria.
+        $includeDirsNode = $clCompileNode.AdditionalIncludeDirectories
+        if ($null -eq $includeDirsNode) {
+            # O namespace é importante para que o MSBuild reconheça o novo elemento
+            $namespace = $clCompileNode.NamespaceURI
+            $includeDirsNode = $xml.CreateElement("AdditionalIncludeDirectories", $namespace)
+            $clCompileNode.AppendChild($includeDirsNode) | Out-Null
+            Write-Host "Created missing 'AdditionalIncludeDirectories' node."
+        }
+        
+        # Pega o valor atual usando InnerText, que é mais seguro que '#text'
+        $currentIncludes = $includeDirsNode.InnerText
+        # --- FIM DA CORREÇÃO ---
         
         # Adiciona o caminho que falta para os headers do Opus
         $newIncludePath = ";../../opus-source/include"
         
         # Verifica se o patch já não foi aplicado para evitar duplicatas
         if ($currentIncludes -notlike "*$newIncludePath*") {
-            $includeDirsNode.'#text' = $currentIncludes + $newIncludePath
+            $includeDirsNode.InnerText = $currentIncludes + $newIncludePath
             Write-Host "Successfully patched include path."
         } else {
             Write-Host "Include path already exists. No patch needed."
