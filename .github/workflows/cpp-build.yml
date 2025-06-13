@@ -1,34 +1,31 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 27 (Final version with user-patched script)
+# WORKFLOW VERSION: 28 (Simplified patch step)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 13, 2025
 # 
-# This header should be updated keeping the same format on every interaction.
-# Static things and recomendations for AI:
+# Static things and recomendations for AI, you should never alter these recommendations and never skip any of these:
 #  1º Comments in this file are always in english
 #  2º WORKFLOW VERSION has to be updated by each IA interatiction
-#  3º Bellow this section the IA should explain every success step on build proccess
+#  3º Bellow this section the AI should explain every success step on build proccess
 #  4º In Order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
 #   - `config_site.h`: used for includes and variables declarations
 #   - `patch.ps1`: powershell script (user must ensure this is the corrected version)
-#  Above this line the AI should never forget.
 #
 # == Explanation of Build Steps ==
 #
 # This workflow assumes that the `patch.ps1` script in the repository has been manually
-# updated by the user to handle missing XML nodes. It no longer contains steps to
-# dynamically modify the script.
+# updated by the user. The step to dynamically modify the script has been removed for clarity
+# and correctness.
 #
 # 1.  **Setup & Checkout**: Checks out all necessary repositories.
 #
 # 2.  **Configuration**: Copies the `config_site.h` to the PJSIP directory.
 #
-# 3.  **Run PJSIP Patch**: Executes the `patch.ps1` script. This should now run without
-#     errors, modifying the PJSIP project file to include the Opus headers.
+# 3.  **Run PJSIP Patch**: Executes the user's `patch.ps1` script directly.
 #
 # 4.  **Build Dependencies & Main Project**: Builds Opus, then PJSIP, and finally the
 #     main MicroSIP application.
@@ -77,9 +74,6 @@ jobs:
       working-directory: ./pjproject
       run: |
         # We execute the user's patch.ps1 script, which is expected to be correct.
-        # First, ensure the file it needs to patch has the correct name (pjmedia_codec.vcxproj).
-        (Get-Content ../sufficit-microsip/patch.ps1) -replace 'pjmedia-codec.vcxproj', 'pjmedia_codec.vcxproj' | Set-Content ../sufficit-microsip/patch.ps1
-        # Now, run the script.
         ../sufficit-microsip/patch.ps1
 
     - name: 6. Build Opus Library
