@@ -1,5 +1,5 @@
 # This script patches the PJSIP project file to add the correct Opus include path.
-# Version 4 - Updated to add the path to where Opus headers are copied within PJSIP's structure.
+# Version 5 - Fixed PowerShell parsing of MSBuild variables in target condition.
 
 [CmdletBinding()]
 param (
@@ -13,7 +13,8 @@ Write-Host "Loading project file to patch: $ProjFile"
 $xml = [xml](Get-Content $ProjFile)
 
 # Define the exact condition string we are looking for.
-$targetCondition = "'$(Configuration)|$(Platform)'=='Release|Win32'"
+# Corrected: Escaped '$' before (Configuration) and (Platform) so PowerShell treats them as literal characters.
+$targetCondition = "'`$(Configuration)`|`$(Platform)'=='Release|Win32'"
 
 $patched = $false
 
