@@ -15,9 +15,9 @@ param (
 Write-Host "Compilando a solução: $SlnFile"
 Write-Host "Adicionando o caminho de inclusão do Opus: $OpusIncludePath"
 
-# Aqui, não precisamos escapar o '$', pois estamos em um script .ps1 dedicado.
+# Correção: Escapa o '$' para que o PowerShell não tente expandir $(AdditionalIncludeDirectories)
 # MSBuild irá interpretar a variável $(AdditionalIncludeDirectories) corretamente.
-$includeArgument = "`"$(AdditionalIncludeDirectories);$OpusIncludePath`""
+$includeArgument = "`"`$(AdditionalIncludeDirectories);$OpusIncludePath`""
 
 msbuild.exe $SlnFile /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories=$includeArgument
 
