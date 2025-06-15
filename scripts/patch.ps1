@@ -1,5 +1,5 @@
 # This script patches the PJSIP project file to set comprehensive and correct include paths.
-# Version 9 - Added explicit include paths for third-party libraries (Opus and Speex) within PJSIP.
+# Version 10 - Updated to use absolute paths for Opus and Speex includes after tracing the build issue.
 
 [CmdletBinding()]
 param (
@@ -43,19 +43,21 @@ foreach ($group in $xml.Project.ItemDefinitionGroup) {
 
         # Clear existing include paths before adding new ones, to prevent conflicts or incorrect ordering.
         $currentIncludes = "" 
+        
+        # Get the absolute path to the workspace root
+        $workspaceRoot = $env:GITHUB_WORKSPACE
 
-        # Define all necessary include paths. These are relative to pjmedia/build/
-        # They cover general PJSIP modules and specific third-party libraries.
-        # Order matters: more specific paths should generally come before more general ones if there are name collisions.
+        # Define all necessary include paths using absolute paths.
+        # This resolves the ambiguity of relative paths and ensures correctness.
         $pathsToAdd = @(
-            "../../../pjlib/include/pj",         # For Opus (copied), and pj/config_site.h etc.
-            "../../pjlib/include",              # For general pj/*.h headers (e.g., pj/config.h, pj/pool.h)
-            "../include",                       # For general pjmedia/*.h headers (e.g., pjmedia/config.h, pjmedia/errno.h)
-            "../include/pjmedia-codec",         # For pjmedia-codec/*.h headers (e.g., amr_sdp_match.h, opus.h internal PJSIP)
+            (Join-Path -Path $workspaceRoot -ChildPath "pjproject/pjlib/include/pj"),         # For Opus (copied), and pj/config_site.h etc.
+            (Join-Path -Path $workspaceRoot -ChildPath "pjproject/pjlib/include"),              # For general pj/*.h headers (e.g., pj/config.h, pj/pool.h)
+            (Join-Path -Path $workspaceRoot -ChildPath "pjproject/pjmedia/include"),            # For general pjmedia/*.h headers (e.g., pjmedia/config.h, pjmedia/errno.h)
+            (Join-Path -Path $workspaceRoot -ChildPath "pjproject/pjmedia/include/pjmedia-codec"), # For pjmedia-codec/*.h headers (e.g., amr_sdp_match.h, opus.h internal PJSIP)
             
-            # Explicit paths for third-party libraries:
-            "../../third_party/speex/include",  # For speex/speex.h
-            "../../third_party/opus/include"    # For opus/opus.h (if PJSIP source directly references this, though our copy handles it)
+            # Explicit path for Speex library using its absolute location:
+            (Join-Path -Path $workspaceRoot -ChildPath "pjproject/third_party/speex/include")  # For speex/speex.h
+            # The Opus headers are now found via the pjproject/pjlib/include/pj path
         )
 
         foreach ($path in $pathsToAdd) {
@@ -67,7 +69,9 @@ foreach ($group in $xml.Project.ItemDefinitionGroup) {
             Write-Host "Adding include path: $path"
         }
         
-        $includeDirsNode.InnerText = $currentIncludes
+        # Preserve any existing AdditionalIncludeDirectories to avoid breaking other necessary includes.
+        # This is typically represented by the $(AdditionalIncludeDirectories) macro in MSBuild.
+        $includeDirsNode.InnerText = $currentIncludes + ";`$(AdditionalIncludeDirectories)"
         Write-Host "Final AdditionalIncludeDirectories set to: $($includeDirsNode.InnerText)"
         $patched = $true
         break # Exit the loop

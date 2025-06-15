@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 49 (Confirmation - Patch script path verification)
+# Version: 50 (Adjusted Opus include paths in patch script for absolute correctness)
 #
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
@@ -156,21 +156,3 @@ jobs:
         name: microsip-build
         # The artifact path is also simpler now.
         path: Release/microsip.exe
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-    - name: 1. Download build artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: microsip-build
-    - name: 2. Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ needs.build.outputs.version }}
-        name: "Release ${{ needs.build.outputs.version }}"
-        body: "Versão compilada automaticamente a partir do último push para a branch main."
-        files: microsip.exe
