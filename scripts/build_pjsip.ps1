@@ -1,50 +1,46 @@
 # scripts/build_pjsip.ps1
 #
-# Este script compila a solução PJSIP, adicionando de forma robusta
-# o caminho de inclusão para a biblioteca Opus.
+# This script compiles the PJSIP solution, robustly adding
+# the include path for the Opus library.
+# =================================================================================================
+#
+# Author: Hugo Castro de Deco, Sufficit
+# Collaboration: Gemini AI for Google
+# Date: June 15, 2025
+# Verion: 01
+#
+# This header should be updated keeping the same format on every interaction.
+# Static things and recomendations for AI:
+#
+#  1º Comments in this file are always in english
+#  2º Version has to be updated by each IA interatiction
+#  3º Bellow this section the AI should explain every success step on build proccess
+#  4º Do not change this header structure
 
 [CmdletBinding()]
 param (
-    [Parameter(Mandatory=$true)]
+    # OpusIncludePath parameter is no longer strictly necessary for build logic,
+    # as headers are copied directly in the workflow, but kept for compatibility.
+    [Parameter(Mandatory=$false)] # Made optional as direct copying is now handled in workflow
     [string]$OpusIncludePath,
 
     [Parameter(Mandatory=$true)]
     [string]$SlnFile
 )
 
-Write-Host "Compilando a solução: $SlnFile"
-Write-Host "Adicionando o caminho de inclusão do Opus: $OpusIncludePath"
+Write-Host "Compiling solution: $SlnFile"
+# Write-Host "Adding Opus include path: $OpusIncludePath" # No longer directly used for MSBuild includes
 
-# --- Início da Depuração ---
-# Verifica se o diretório de inclusão do Opus existe
-if (-not (Test-Path $OpusIncludePath)) {
-    Write-Host "##[error]Erro: O caminho de inclusão do Opus não existe: $OpusIncludePath"
-    exit 1
-} else {
-    Write-Host "Caminho de inclusão do Opus verificado: $OpusIncludePath (Existe)"
-}
-
-# Verifica se o arquivo opus/opus.h existe dentro do caminho de inclusão
-$opusHeaderPath = Join-Path -Path $OpusIncludePath -ChildPath "opus/opus.h"
-if (-not (Test-Path $opusHeaderPath)) {
-    Write-Host "##[error]Erro: O arquivo 'opus/opus.h' não foi encontrado em: $opusHeaderPath"
-    Write-Host "Certifique-se de que a estrutura de pastas do Opus esteja correta (opus-source/include/opus/opus.h)."
-    exit 1
-} else {
-    Write-Host "Arquivo 'opus/opus.h' verificado: $opusHeaderPath (Existe)"
-}
-# --- Fim da Depuração ---
-
-# Correção: Escapa o '$' para que o PowerShell não tente expandir $(AdditionalIncludeDirectories)
-# MSBuild irá interpretar a variável $(AdditionalIncludeDirectories) corretamente.
-$includeArgument = "`"`$(AdditionalIncludeDirectories);$OpusIncludePath`""
+# Correct: Escapes the '$' so PowerShell doesn't try to expand $(AdditionalIncludeDirectories)
+# MSBuild will correctly interpret the $(AdditionalIncludeDirectories) variable.
+$includeArgument = "`"`$(AdditionalIncludeDirectories)`"" # Removed $OpusIncludePath as headers are copied
 
 msbuild.exe $SlnFile /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories=$includeArgument
 
-# Verifica o código de saída do MSBuild. Se não for 0 (sucesso), encerra o script com erro.
+# Checks the MSBuild exit code. If it's not 0 (success), exits the script with an error.
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "##[error]O build do MSBuild falhou com o código de saída: $LASTEXITCODE"
+    Write-Host "##[error]MSBuild build failed with exit code: $LASTEXITCODE"
     exit $LASTEXITCODE
 }
 
-Write-Host "Build do PJSIP concluído com sucesso."
+Write-Host "PJSIP build completed successfully."

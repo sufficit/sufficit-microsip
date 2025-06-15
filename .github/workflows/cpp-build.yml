@@ -1,12 +1,12 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 38 (Fix - Explicit PowerShell script execution)
+# WORKFLOW VERSION: 39 (Fix - Copy Opus headers explicitly)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# 
+#
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
 #
@@ -66,24 +66,34 @@ jobs:
         cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
         cmake --build opus-build --config Release
 
-    - name: 6. Add MSBuild to path
-      uses: microsoft/setup-msbuild@v2
-
-    - name: 7. Build PJSIP Solution
+    - name: 6. Copy Opus Headers to PJSIP Include Path
       shell: pwsh
       run: |
-        # Define os caminhos absolutos, agora a partir da raiz do workspace.
-        $opus_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "opus-source/include"
+        # Ensure the target directory for Opus headers exists within PJSIP's include structure
+        $targetOpusIncludeDir = "pjproject/pjlib/include/pj/opus"
+        New-Item -ItemType Directory -Force -Path $targetOpusIncludeDir
+        # Copy all Opus header files from its source include directory into PJSIP's expected structure
+        Copy-Item -Path "opus-source/include/opus/*.h" -Destination $targetOpusIncludeDir
+
+    - name: 7. Add MSBuild to path
+      uses: microsoft/setup-msbuild@v2
+
+    - name: 8. Build PJSIP Solution
+      shell: pwsh
+      run: |
+        # Define absolute paths, now from the workspace root.
+        # The Opus include path is no longer passed here, as headers are copied directly.
         $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject/pjproject-vs14.sln"
         $script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/build_pjsip.ps1"
         
-        Write-Host "Executando o script: $script_path"
+        Write-Host "Executing script: $script_path"
         
-        # Chama o script de build usando seu caminho absoluto e o operador de chamada '-File'.
-        # Isso garante que o PowerShell execute o arquivo diretamente, evitando problemas de reconhecimento de comando.
-        pwsh.exe -File $script_path -OpusIncludePath $opus_path -SlnFile $sln_path
+        # Call the build script using its absolute path and the '-File' operator.
+        # It's no longer necessary to pass OpusIncludePath to build_pjsip.ps1
+        # because the headers are now placed directly in PJSIP's include structure.
+        pwsh.exe -File $script_path -SlnFile $sln_path
 
-    - name: 8. Prepare Libraries for Final Build
+    - name: 9. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Collecting all libraries for MicroSIP ---"
@@ -92,21 +102,21 @@ jobs:
         Copy-Item -Path pjproject/lib/*.lib -Destination $dist_dir
         Copy-Item -Path opus-build/Release/opus.lib -Destination $dist_dir
         
-    - name: 9. Generate Version Tag
+    - name: 10. Generate Version Tag
       id: generate_version
       shell: bash
       run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
       
-    - name: 10. Build the final project
+    - name: 11. Build the final project
       shell: pwsh
-      # Agora executamos a partir da raiz, pois o checkout foi simplificado.
+      # Now executing from the root, as checkout was simplified.
       run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="./dist/lib"
 
-    - name: 11. Upload build artifact
+    - name: 12. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
-        # O caminho para o artefato também é mais simples agora.
+        # The artifact path is also simpler now.
         path: Release/microsip.exe
 
   release:
