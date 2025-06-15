@@ -1,6 +1,7 @@
 #define PJ_WIN32 1
 #define NOMINMAX // Prevent min/max macros from windows.h
 #define WIN32_LEAN_AND_MEAN // Reduce size of windows.h, preventing some conflicts
+#define PJ_HAS_STANDARD_CTYPE 1 // Use standard ctype.h functions instead of PJSIP wrappers
 #include <windows.h>
 #define PJ_HAS_IPV6 1
 #define PJMEDIA_HAS_OPUS_CODEC 1
