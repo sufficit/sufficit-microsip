@@ -1,17 +1,16 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 46 (Confirmation - Retaining Opus header source checks)
-#
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
+# Version: 49 (Confirmation - Patch script path verification)
 #
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
 #
 #  1. Comments in this file are always in english
-#  2. WORKFLOW VERSION has to be updated by each IA interatiction
+#  2. Version has to be updated by each IA interatiction
 #  3. Below this section the AI should explain every success step on build proccess
 #  4. In order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
 #   - `config_site.h`: used for includes and variables declarations
@@ -26,6 +25,8 @@
 # This workflow is the definitive version. It uses a separate script for the PJSIP
 # build and has simplified, robust pathing by checking out the main repo to the root
 # of the workspace. This avoids all previous path resolution and script execution errors.
+# The compiled Opus library (opus.lib) will be located in the 'dist/lib' directory
+# alongside other PJSIP libraries after the "Prepare Libraries for Final Build" step.
 # =================================================================================================
 
 name: Build C++ and Create Release
@@ -107,7 +108,15 @@ jobs:
     - name: 7. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 8. Build PJSIP Solution
+    - name: 8. Patch PJSIP pjmedia_codec.vcxproj for Opus include path
+      shell: pwsh
+      run: |
+        $patch_script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/patch.ps1"
+        $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject/pjmedia/build/pjmedia_codec.vcxproj"
+        Write-Host "Executing patch script: $patch_script_path on $pjmedia_codec_vcxproj_path"
+        pwsh.exe -File $patch_script_path -ProjFile $pjmedia_codec_vcxproj_path
+
+    - name: 9. Build PJSIP Solution
       shell: pwsh
       run: |
         # Define absolute paths, now from the workspace root.
@@ -122,7 +131,7 @@ jobs:
         # because the headers are now placed directly in PJSIP's include structure.
         pwsh.exe -File $script_path -SlnFile $sln_path
 
-    - name: 9. Prepare Libraries for Final Build
+    - name: 10. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Collecting all libraries for MicroSIP ---"
@@ -131,17 +140,17 @@ jobs:
         Copy-Item -Path pjproject/lib/*.lib -Destination $dist_dir
         Copy-Item -Path opus-build/Release/opus.lib -Destination $dist_dir
         
-    - name: 10. Generate Version Tag
+    - name: 11. Generate Version Tag
       id: generate_version
       shell: bash
       run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
       
-    - name: 11. Build the final project
+    - name: 12. Build the final project
       shell: pwsh
       # Now executing from the root, as checkout was simplified.
       run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="./dist/lib"
 
-    - name: 12. Upload build artifact
+    - name: 13. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build

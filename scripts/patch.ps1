@@ -1,67 +1,72 @@
-# Este script corrige o arquivo de projeto da PJSIP que possui um caminho de inclusão quebrado para o Opus.
-# Versão 3 - Versão mais robusta usando SelectSingleNode para garantir a existência dos elementos XML.
+# This script patches the PJSIP project file to add the correct Opus include path.
+# Version 4 - Updated to add the path to where Opus headers are copied within PJSIP's structure.
 
-$projFile = "./pjmedia/build/pjmedia_codec.vcxproj"
-Write-Host "Loading project file to patch: $projFile"
+[CmdletBinding()]
+param (
+    [Parameter(Mandatory=$true)]
+    [string]$ProjFile
+)
 
-# Carrega o conteúdo do arquivo XML
-$xml = [xml](Get-Content $projFile)
+Write-Host "Loading project file to patch: $ProjFile"
 
-# Define a string exata da condição que queremos encontrar.
-$targetCondition = "'`$(Configuration)`|`$(Platform)'=='Release|Win32'"
+# Load the XML content of the project file
+$xml = [xml](Get-Content $ProjFile)
+
+# Define the exact condition string we are looking for.
+$targetCondition = "'$(Configuration)|$(Platform)'=='Release|Win32'"
 
 $patched = $false
 
-# Itera por todos os grupos de definição de item no projeto
+# Iterate through all item definition groups in the project
 foreach ($group in $xml.Project.ItemDefinitionGroup) {
-    # Se a condição do grupo for exatamente a que procuramos
+    # If the group's condition matches what we are looking for
     if ($group.Condition -eq $targetCondition) {
         Write-Host "Found 'Release|Win32' configuration. Patching..."
-        
-        # --- INÍCIO DA CORREÇÃO ROBUSTA ---
-        # Garante que o nó <ClCompile> exista.
+
+        # Ensure the <ClCompile> node exists.
         $clCompileNode = $group.SelectSingleNode("ClCompile")
         if ($null -eq $clCompileNode) {
             Write-Host "ClCompile node not found. Creating it."
-            # Usa o namespace do elemento pai para criar o novo nó
+            # Use the parent element's namespace to create the new node
             $clCompileNode = $xml.CreateElement("ClCompile", $group.NamespaceURI)
             $group.AppendChild($clCompileNode) | Out-Null
         }
-        
-        # Garante que o nó <AdditionalIncludeDirectories> exista dentro de <ClCompile>.
+
+        # Ensure the <AdditionalIncludeDirectories> node exists within <ClCompile>.
         $includeDirsNode = $clCompileNode.SelectSingleNode("AdditionalIncludeDirectories")
         if ($null -eq $includeDirsNode) {
             Write-Host "Creating missing 'AdditionalIncludeDirectories' node."
             $includeDirsNode = $xml.CreateElement("AdditionalIncludeDirectories", $clCompileNode.NamespaceURI)
             $clCompileNode.AppendChild($includeDirsNode) | Out-Null
         }
-        # --- FIM DA CORREÇÃO ROBUSTA ---
 
-        # Agora que temos certeza de que o nó existe, podemos modificá-lo com segurança.
+        # Now that we are sure the node exists, we can safely modify it.
         $currentIncludes = $includeDirsNode.InnerText
-        $newIncludePath = ";../../opus-source/include"
-        
-        # Verifica se o patch já não foi aplicado para evitar duplicatas
+        # This is the new relative path from pjmedia/build/pjmedia_codec.vcxproj to pjproject/pjlib/include/pj/
+        # where the 'opus' subdirectory now resides.
+        $newIncludePath = ";../../../pjlib/include/pj"
+
+        # Check if the patch has already been applied to avoid duplicates
         if ($currentIncludes -notlike "*$newIncludePath*") {
-            # Adiciona o novo valor
+            # Add the new value
             $includeDirsNode.InnerText = ($currentIncludes + $newIncludePath)
-            Write-Host "Successfully patched include path."
+            Write-Host "Successfully patched include path: $newIncludePath"
         } else {
             Write-Host "Include path already exists. No patch needed."
         }
         
         $patched = $true
-        break # Sai do loop
+        break # Exit the loop
     }
 }
 
 if (-not $patched) {
-    Write-Host "FATAL: Could not find 'Release|Win32' configuration in $projFile to patch."
+    Write-Host "##[error]FATAL: Could not find 'Release|Win32' configuration in $ProjFile to patch."
     exit 1
 }
 
-# Salva o arquivo .vcxproj modificado
-$xml.Save($projFile)
-Write-Host "Saved updated project file: $projFile"
+# Save the modified .vcxproj file
+$xml.Save($ProjFile)
+Write-Host "Saved updated project file: $ProjFile"
 
 exit 0
