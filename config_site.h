@@ -2,7 +2,7 @@
 #define NOMINMAX // Prevent min/max macros from windows.h
 #define WIN32_LEAN_AND_MEAN // Reduce size of windows.h, preventing some conflicts
 #define PJ_HAS_STANDARD_CTYPE 1 // Use standard ctype.h functions instead of PJSIP wrappers
-// Removed _WIN32_WINNT and WINVER as they are defined by the build environment.
+// _WIN32_WINNT and WINVER will now be passed via MSBuild command line or handled by default SDK.
 #include <windows.h>
 #define PJ_HAS_IPV6 1
 #define PJMEDIA_HAS_OPUS_CODEC 1

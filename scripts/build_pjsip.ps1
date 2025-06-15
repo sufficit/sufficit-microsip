@@ -7,7 +7,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Verion: 01
+# Version: 02 (Added _WIN32_WINNT and WINVER definitions to MSBuild command line)
 #
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
@@ -35,7 +35,11 @@ Write-Host "Compiling solution: $SlnFile"
 # MSBuild will correctly interpret the $(AdditionalIncludeDirectories) variable.
 $includeArgument = "`"`$(AdditionalIncludeDirectories)`"" # Removed $OpusIncludePath as headers are copied
 
-msbuild.exe $SlnFile /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories=$includeArgument
+# Define _WIN32_WINNT and WINVER explicitly in the MSBuild command line
+# This helps resolve conflicts with Windows SDK headers by ensuring these are defined early and consistently.
+$winverDefines = "/p:_WIN32_WINNT=0x0601 /p:WINVER=0x0601"
+
+msbuild.exe $SlnFile /p:Configuration=Release /p:Platform=Win32 /p:AdditionalIncludeDirectories=$includeArgument $winverDefines
 
 # Checks the MSBuild exit code. If it's not 0 (success), exits the script with an error.
 if ($LASTEXITCODE -ne 0) {
