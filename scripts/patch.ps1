@@ -1,5 +1,5 @@
 # This script patches the PJSIP project file to add the correct Opus include path and other essential PJSIP include paths.
-# Version 6 - Added multiple essential PJSIP internal include paths to pjmedia_codec.vcxproj.
+# Version 7 - Added specific 'pjmedia-codec' include path and ensured all essential PJSIP internal includes.
 
 [CmdletBinding()]
 param (
@@ -45,22 +45,26 @@ foreach ($group in $xml.Project.ItemDefinitionGroup) {
         $currentIncludes = $includeDirsNode.InnerText
 
         # Define all necessary include paths. These are relative to pjmedia/build/
-        # - ../../pjlib/include/pj: Where config_site.h and Opus headers (under 'opus/') are copied
-        # - ../include: The current project's (pjmedia_codec) own include folder
-        # - ../../pjmedia/include: General pjmedia headers
-        # - ../../pjlib/include: General pjlib headers
+        # They cover general PJSIP modules and the specific 'pjmedia-codec' and 'pj' subdirectories.
         $pathsToAdd = @(
-            "../../../pjlib/include/pj", # For Opus, and general pjlib/include/pj specific headers like config_site.h
-            "../include",                 # For pjmedia_codec's own headers (e.g., pjmedia-codec.h, amr_sdp_match.h etc.)
-            "../../pjmedia/include",      # For general pjmedia headers (e.g., pjmedia/errno.h)
-            "../../pjlib/include"         # For general pjlib headers
+            "../../../pjlib/include/pj",         # For Opus (copied), and pj/config_site.h etc.
+            "../../pjlib/include",              # For general pj/*.h headers (e.g., pj/config.h, pj/pool.h)
+            "../include",                       # For general pjmedia/*.h headers (e.g., pjmedia/config.h, pjmedia/errno.h)
+            "../include/pjmedia-codec"          # For pjmedia-codec/*.h headers (e.g., amr_sdp_match.h, opus.h)
+            # Add other necessary PJSIP module includes if they become issues
+            # "../../pjlib-util/include",
+            # "../../pjnath/include",
+            # "../../pjsip/include"
         )
 
         foreach ($path in $pathsToAdd) {
             # Check if the current path has already been added to avoid duplicates
             if ($currentIncludes -notlike "*$path*") {
-                # Add the new value
-                $currentIncludes = ($currentIncludes + ";" + $path)
+                # Add the new value, ensuring a semicolon separator
+                if ($currentIncludes -ne "") {
+                    $currentIncludes += ";"
+                }
+                $currentIncludes += $path
                 Write-Host "Successfully added include path: $path"
             } else {
                 Write-Host "Include path already exists. No patch needed for: $path"
