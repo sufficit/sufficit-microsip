@@ -1,5 +1,5 @@
-# This script patches the PJSIP project file to add the correct Opus include path and other essential PJSIP include paths.
-# Version 7 - Added specific 'pjmedia-codec' include path and ensured all essential PJSIP internal includes.
+# This script patches the PJSIP project file to set comprehensive and correct include paths.
+# Version 8 - Overwrites AdditionalIncludeDirectories to ensure correct and complete paths.
 
 [CmdletBinding()]
 param (
@@ -41,37 +41,34 @@ foreach ($group in $xml.Project.ItemDefinitionGroup) {
             $clCompileNode.AppendChild($includeDirsNode) | Out-Null
         }
 
-        # Now that we are sure the node exists, we can safely modify it.
-        $currentIncludes = $includeDirsNode.InnerText
+        # Clear existing include paths before adding new ones, to prevent conflicts or incorrect ordering.
+        $currentIncludes = "" 
 
         # Define all necessary include paths. These are relative to pjmedia/build/
         # They cover general PJSIP modules and the specific 'pjmedia-codec' and 'pj' subdirectories.
+        # Order matters: more specific paths should generally come before more general ones if there are name collisions.
         $pathsToAdd = @(
             "../../../pjlib/include/pj",         # For Opus (copied), and pj/config_site.h etc.
             "../../pjlib/include",              # For general pj/*.h headers (e.g., pj/config.h, pj/pool.h)
             "../include",                       # For general pjmedia/*.h headers (e.g., pjmedia/config.h, pjmedia/errno.h)
             "../include/pjmedia-codec"          # For pjmedia-codec/*.h headers (e.g., amr_sdp_match.h, opus.h)
-            # Add other necessary PJSIP module includes if they become issues
+            # Potentially add other PJSIP module includes if future errors arise:
             # "../../pjlib-util/include",
             # "../../pjnath/include",
             # "../../pjsip/include"
         )
 
         foreach ($path in $pathsToAdd) {
-            # Check if the current path has already been added to avoid duplicates
-            if ($currentIncludes -notlike "*$path*") {
-                # Add the new value, ensuring a semicolon separator
-                if ($currentIncludes -ne "") {
-                    $currentIncludes += ";"
-                }
-                $currentIncludes += $path
-                Write-Host "Successfully added include path: $path"
-            } else {
-                Write-Host "Include path already exists. No patch needed for: $path"
+            # Add the new value, ensuring a semicolon separator if not the first path
+            if ($currentIncludes -ne "") {
+                $currentIncludes += ";"
             }
+            $currentIncludes += $path
+            Write-Host "Adding include path: $path"
         }
         
         $includeDirsNode.InnerText = $currentIncludes
+        Write-Host "Final AdditionalIncludeDirectories set to: $($includeDirsNode.InnerText)"
         $patched = $true
         break # Exit the loop
     }
