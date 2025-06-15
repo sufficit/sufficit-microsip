@@ -1,11 +1,11 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 37 (Final - Simplified Pathing and Correct Script Call)
+# WORKFLOW VERSION: 38 (Fix - Explicit PowerShell script execution)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 13, 2025
+# Date: June 15, 2025
 # 
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
@@ -79,8 +79,9 @@ jobs:
         
         Write-Host "Executando o script: $script_path"
         
-        # Chama o script de build usando seu caminho absoluto e o operador de chamada '&'.
-        & $script_path -OpusIncludePath $opus_path -SlnFile $sln_path
+        # Chama o script de build usando seu caminho absoluto e o operador de chamada '-File'.
+        # Isso garante que o PowerShell execute o arquivo diretamente, evitando problemas de reconhecimento de comando.
+        pwsh.exe -File $script_path -OpusIncludePath $opus_path -SlnFile $sln_path
 
     - name: 8. Prepare Libraries for Final Build
       shell: pwsh
