@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 52 (Added PJ_HAS_STANDARD_CTYPE to config_site.h to resolve ctype and basetsd.h conflicts)
+# Version: 53 (Defined _WIN32_WINNT and WINVER in config_site.h for improved Windows SDK compatibility)
 #
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
