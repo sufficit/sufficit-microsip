@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 54 (Removed explicit _WIN32_WINNT and WINVER from config_site.h; added to MSBuild command line)
+# Version: 55 (Added PJ_DONT_NEED_WIN32_VER_HACKS to config_site.h to prevent WinVer redefinition)
 #
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
