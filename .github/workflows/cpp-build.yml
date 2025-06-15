@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 40 (Debug - List Opus include directory contents)
+# WORKFLOW VERSION: 41 (Fix - Correct Opus header copy path and YAML syntax)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -10,14 +10,14 @@
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
 #
-#  1º Comments in this file are always in english
-#  2º WORKFLOW VERSION has to be updated by each IA interatiction
-#  3º Bellow this section the AI should explain every success step on build proccess
-#  4º In Order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
+#  1. Comments in this file are always in english
+#  2. WORKFLOW VERSION has to be updated by each IA interatiction
+#  3. Below this section the AI should explain every success step on build proccess
+#  4. In order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
 #   - `config_site.h`: used for includes and variables declarations
 #   - `scripts/build_pjsip.ps1`: the definitive build script (with underscore)
-#  5º Build OPUS and PJSIP With OPUS
-#  6º Do not change this header structure
+#  5. Build OPUS and PJSIP With OPUS (This is a general instruction)
+#  6. Do not change this header structure
 #
 # Above this line the should never forget.
 #
@@ -67,25 +67,21 @@ jobs:
         cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
         cmake --build opus-build --config Release
 
-    - name: 6. Debug: List Opus Include Directory Contents
-      shell: pwsh
-      run: |
-        Write-Host "Listing contents of opus-source/include:"
-        Get-ChildItem -Path "opus-source/include" -Recurse
-
-    - name: 7. Copy Opus Headers to PJSIP Include Path
+    - name: 6. Copy Opus Headers to PJSIP Include Path
       shell: pwsh
       run: |
         # Ensure the target directory for Opus headers exists within PJSIP's include structure
+        # PJSIP expects 'opus/opus.h', so we create an 'opus' subdirectory here.
         $targetOpusIncludeDir = "pjproject/pjlib/include/pj/opus"
         New-Item -ItemType Directory -Force -Path $targetOpusIncludeDir
-        # Copy all Opus header files from its source include directory into PJSIP's expected structure
-        Copy-Item -Path "opus-source/include/opus/*.h" -Destination $targetOpusIncludeDir
+        # Copy all Opus header files from its source include directory (where they are directly under 'include')
+        # into PJSIP's expected structure ('pjproject/pjlib/include/pj/opus/').
+        Copy-Item -Path "opus-source/include/*.h" -Destination $targetOpusIncludeDir
 
-    - name: 8. Add MSBuild to path
+    - name: 7. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 9. Build PJSIP Solution
+    - name: 8. Build PJSIP Solution
       shell: pwsh
       run: |
         # Define absolute paths, now from the workspace root.
@@ -100,7 +96,7 @@ jobs:
         # because the headers are now placed directly in PJSIP's include structure.
         pwsh.exe -File $script_path -SlnFile $sln_path
 
-    - name: 10. Prepare Libraries for Final Build
+    - name: 9. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Collecting all libraries for MicroSIP ---"
@@ -109,17 +105,17 @@ jobs:
         Copy-Item -Path pjproject/lib/*.lib -Destination $dist_dir
         Copy-Item -Path opus-build/Release/opus.lib -Destination $dist_dir
         
-    - name: 11. Generate Version Tag
+    - name: 10. Generate Version Tag
       id: generate_version
       shell: bash
       run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
       
-    - name: 12. Build the final project
+    - name: 11. Build the final project
       shell: pwsh
       # Now executing from the root, as checkout was simplified.
       run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="./dist/lib"
 
-    - name: 13. Upload build artifact
+    - name: 12. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
