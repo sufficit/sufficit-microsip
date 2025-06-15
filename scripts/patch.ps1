@@ -1,5 +1,5 @@
-# This script patches the PJSIP project file to add the correct Opus include path.
-# Version 5 - Fixed PowerShell parsing of MSBuild variables in target condition.
+# This script patches the PJSIP project file to add the correct Opus include path and other essential PJSIP include paths.
+# Version 6 - Added multiple essential PJSIP internal include paths to pjmedia_codec.vcxproj.
 
 [CmdletBinding()]
 param (
@@ -13,7 +13,7 @@ Write-Host "Loading project file to patch: $ProjFile"
 $xml = [xml](Get-Content $ProjFile)
 
 # Define the exact condition string we are looking for.
-# Corrected: Escaped '$' before (Configuration) and (Platform) so PowerShell treats them as literal characters.
+# Escaped '$' before (Configuration) and (Platform) so PowerShell treats them as literal characters.
 $targetCondition = "'`$(Configuration)`|`$(Platform)'=='Release|Win32'"
 
 $patched = $false
@@ -43,19 +43,31 @@ foreach ($group in $xml.Project.ItemDefinitionGroup) {
 
         # Now that we are sure the node exists, we can safely modify it.
         $currentIncludes = $includeDirsNode.InnerText
-        # This is the new relative path from pjmedia/build/pjmedia_codec.vcxproj to pjproject/pjlib/include/pj/
-        # where the 'opus' subdirectory now resides.
-        $newIncludePath = ";../../../pjlib/include/pj"
 
-        # Check if the patch has already been applied to avoid duplicates
-        if ($currentIncludes -notlike "*$newIncludePath*") {
-            # Add the new value
-            $includeDirsNode.InnerText = ($currentIncludes + $newIncludePath)
-            Write-Host "Successfully patched include path: $newIncludePath"
-        } else {
-            Write-Host "Include path already exists. No patch needed."
+        # Define all necessary include paths. These are relative to pjmedia/build/
+        # - ../../pjlib/include/pj: Where config_site.h and Opus headers (under 'opus/') are copied
+        # - ../include: The current project's (pjmedia_codec) own include folder
+        # - ../../pjmedia/include: General pjmedia headers
+        # - ../../pjlib/include: General pjlib headers
+        $pathsToAdd = @(
+            "../../../pjlib/include/pj", # For Opus, and general pjlib/include/pj specific headers like config_site.h
+            "../include",                 # For pjmedia_codec's own headers (e.g., pjmedia-codec.h, amr_sdp_match.h etc.)
+            "../../pjmedia/include",      # For general pjmedia headers (e.g., pjmedia/errno.h)
+            "../../pjlib/include"         # For general pjlib headers
+        )
+
+        foreach ($path in $pathsToAdd) {
+            # Check if the current path has already been added to avoid duplicates
+            if ($currentIncludes -notlike "*$path*") {
+                # Add the new value
+                $currentIncludes = ($currentIncludes + ";" + $path)
+                Write-Host "Successfully added include path: $path"
+            } else {
+                Write-Host "Include path already exists. No patch needed for: $path"
+            }
         }
         
+        $includeDirsNode.InnerText = $currentIncludes
         $patched = $true
         break # Exit the loop
     }
