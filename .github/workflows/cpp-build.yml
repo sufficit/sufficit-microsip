@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 50 (Adjusted Opus include paths in patch script for absolute correctness)
+# Version: 51 (Added NOMINMAX and WIN32_LEAN_AND_MEAN to config_site.h for Windows SDK compatibility)
 #
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
