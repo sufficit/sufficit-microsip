@@ -1,5 +1,5 @@
 # This script patches the PJSIP project file to set comprehensive and correct include paths.
-# Version 8 - Overwrites AdditionalIncludeDirectories to ensure correct and complete paths.
+# Version 9 - Added explicit include paths for third-party libraries (Opus and Speex) within PJSIP.
 
 [CmdletBinding()]
 param (
@@ -45,17 +45,17 @@ foreach ($group in $xml.Project.ItemDefinitionGroup) {
         $currentIncludes = "" 
 
         # Define all necessary include paths. These are relative to pjmedia/build/
-        # They cover general PJSIP modules and the specific 'pjmedia-codec' and 'pj' subdirectories.
+        # They cover general PJSIP modules and specific third-party libraries.
         # Order matters: more specific paths should generally come before more general ones if there are name collisions.
         $pathsToAdd = @(
             "../../../pjlib/include/pj",         # For Opus (copied), and pj/config_site.h etc.
             "../../pjlib/include",              # For general pj/*.h headers (e.g., pj/config.h, pj/pool.h)
             "../include",                       # For general pjmedia/*.h headers (e.g., pjmedia/config.h, pjmedia/errno.h)
-            "../include/pjmedia-codec"          # For pjmedia-codec/*.h headers (e.g., amr_sdp_match.h, opus.h)
-            # Potentially add other PJSIP module includes if future errors arise:
-            # "../../pjlib-util/include",
-            # "../../pjnath/include",
-            # "../../pjsip/include"
+            "../include/pjmedia-codec",         # For pjmedia-codec/*.h headers (e.g., amr_sdp_match.h, opus.h internal PJSIP)
+            
+            # Explicit paths for third-party libraries:
+            "../../third_party/speex/include",  # For speex/speex.h
+            "../../third_party/opus/include"    # For opus/opus.h (if PJSIP source directly references this, though our copy handles it)
         )
 
         foreach ($path in $pathsToAdd) {
