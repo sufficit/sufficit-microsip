@@ -1,7 +1,7 @@
 # =================================================================================================
 # GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
 #
-# WORKFLOW VERSION: 41 (Fix - Correct Opus header copy path and YAML syntax)
+# WORKFLOW VERSION: 44 (Add - Pre-check for Opus header file existence)
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
@@ -70,13 +70,35 @@ jobs:
     - name: 6. Copy Opus Headers to PJSIP Include Path
       shell: pwsh
       run: |
-        # Ensure the target directory for Opus headers exists within PJSIP's include structure
-        # PJSIP expects 'opus/opus.h', so we create an 'opus' subdirectory here.
-        $targetOpusIncludeDir = "pjproject/pjlib/include/pj/opus"
-        New-Item -ItemType Directory -Force -Path $targetOpusIncludeDir
-        # Copy all Opus header files from its source include directory (where they are directly under 'include')
-        # into PJSIP's expected structure ('pjproject/pjlib/include/pj/opus/').
-        Copy-Item -Path "opus-source/include/*.h" -Destination $targetOpusIncludeDir
+        # PJSIP expects includes like 'opus/opus.h'.
+        # The Opus repository has its headers in 'opus-source/include/opus/'.
+        # We need to copy the 'opus' directory itself into PJSIP's 'pjlib/include/pj/' directory.
+        $targetPjIncludeBase = "pjproject/pjlib/include/pj"
+        $sourceOpusIncludeDir = "opus-source/include/opus"
+        $opusHeaderFile = Join-Path -Path $sourceOpusIncludeDir -ChildPath "opus.h"
+
+        # Check if the source Opus include directory exists before proceeding.
+        if (-not (Test-Path $sourceOpusIncludeDir -PathType Container)) {
+            Write-Host "##[error]Error: The source Opus include directory was not found: $sourceOpusIncludeDir"
+            Write-Host "Please ensure the xiph/opus repository structure is 'opus-source/include/opus/'."
+            exit 1 # Fail the step if the source directory is missing
+        } else {
+            Write-Host "Source Opus include directory verified: $sourceOpusIncludeDir (Exists)"
+        }
+
+        # Check if the primary Opus header file exists within the expected source directory.
+        if (-not (Test-Path $opusHeaderFile -PathType Leaf)) {
+            Write-Host "##[error]Error: The main Opus header file '$($opusHeaderFile)' was not found."
+            Write-Host "Please verify the contents of the 'opus-source/include/opus/' directory."
+            exit 1 # Fail the step if the header file is missing
+        } else {
+            Write-Host "Main Opus header file verified: $($opusHeaderFile) (Exists)"
+        }
+
+        # Ensure the base target directory exists for 'opus' subdirectory
+        New-Item -ItemType Directory -Force -Path $targetPjIncludeBase
+        # Copy the 'opus' directory (and its contents) from opus-source/include/ to pjproject/pjlib/include/pj/
+        Copy-Item -Path $sourceOpusIncludeDir -Recurse -Destination $targetPjIncludeBase
 
     - name: 7. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
