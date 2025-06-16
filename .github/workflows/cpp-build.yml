@@ -87,8 +87,16 @@ jobs:
           Write-Host "Tentando localizar o script: $scriptPath"
           if (Test-Path $scriptPath) {
               Write-Host "Script encontrado em $scriptPath"
-              # Opcional: Saída das primeiras linhas para verificar problemas de BOM/codificação
-              # Get-Content $scriptPath -TotalCount 10 | ForEach-Object { Write-Host $_ }
+              
+              Write-Host "Verificando codificação do script (primeiras 10 linhas, UTF8):"
+              # Lê as primeiras 10 linhas como UTF8 para inspecção visual de caracteres estranhos
+              Get-Content $scriptPath -Encoding UTF8 -TotalCount 10 | ForEach-Object { Write-Host $_ }
+              
+              Write-Host "Verificando bytes brutos do script (primeiros 30 bytes) para BOM:"
+              # Lê os primeiros 30 bytes brutos. UTF-8 BOM é EF BB BF.
+              # Se vir estes bytes no início, indica a presença de BOM.
+              [System.IO.File]::ReadAllBytes($scriptPath) | Select-Object -First 30 | ForEach-Object { "{0:X2}" -f $_ } | Out-String | Write-Host
+
           } else {
               Write-Error "Script NÃO ENCONTRADO em $scriptPath. Saindo."
               exit 1
