@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 56 (Changed Opus compilation to download pre-compiled release from sufficit/opus)
+# Version: 57 (Improved Opus release asset download to be more flexible with asset naming)
 #
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
@@ -68,17 +68,21 @@ jobs:
       run: |
         $releaseApiUrl = "https://api.github.com/repos/sufficit/opus/releases/latest"
         $response = Invoke-RestMethod -Uri $releaseApiUrl
-        $assetUrl = ($response.assets | Where-Object { $_.name -like 'Release.zip' }).browser_download_url
+        
+        # Find the asset that contains "opus" and ends with ".zip"
+        $asset = $response.assets | Where-Object { $_.name -like '*opus*.zip' } | Select-Object -First 1
+        $assetUrl = $asset.browser_download_url
+        $assetName = $asset.name
 
         if (-not $assetUrl) {
-            Write-Host "##[error]Error: Release.zip asset not found in the latest release of sufficit/opus."
+            Write-Host "##[error]Error: No suitable Opus .zip asset found in the latest release of sufficit/opus. Looked for names containing 'opus' and ending with '.zip'."
             exit 1
         }
 
         $tempDir = New-Item -ItemType Directory -Path "opus-extracted" -Force
-        $zipPath = Join-Path -Path $tempDir -ChildPath "Release.zip"
+        $zipPath = Join-Path -Path $tempDir -ChildPath $assetName
 
-        Write-Host "Downloading Opus release from: $assetUrl"
+        Write-Host "Downloading Opus release from: $assetUrl (Asset Name: $assetName)"
         Invoke-WebRequest -Uri $assetUrl -OutFile $zipPath
 
         Write-Host "Extracting $zipPath to $tempDir"
@@ -91,24 +95,28 @@ jobs:
         # Create necessary Opus include directory inside PJSIP
         New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force
 
-        # Copy opus.lib
-        $extractedLibPath = Join-Path -Path $tempDir -ChildPath "Release/opus.lib"
-        if (Test-Path $extractedLibPath) {
-            Copy-Item -Path $extractedLibPath -Destination $distDir
-            Write-Host "Copied opus.lib to $distDir"
+        # The extracted structure might vary. We need to find opus.lib and the include directory.
+        # Let's search for opus.lib directly within the extracted contents.
+        $foundOpusLib = Get-ChildItem -Path $tempDir -Filter "opus.lib" -Recurse | Select-Object -First 1
+
+        if ($foundOpusLib) {
+            Copy-Item -Path $foundOpusLib.FullName -Destination $distDir
+            Write-Host "Copied opus.lib from $($foundOpusLib.FullName) to $distDir"
         } else {
-            Write-Host "##[error]Error: opus.lib not found at $extractedLibPath after extraction."
+            Write-Host "##[error]Error: opus.lib not found within the extracted contents of the Opus release."
             exit 1
         }
 
-        # Copy Opus headers
-        $extractedIncludeDir = Join-Path -Path $tempDir -ChildPath "include"
-        if (Test-Path $extractedIncludeDir -PathType Container) {
-            Copy-Item -Path (Join-Path -Path $extractedIncludeDir -ChildPath "*.h") -Destination $pjIncludeOpusDir
-            Write-Host "Copied Opus headers from $extractedIncludeDir to $pjIncludeOpusDir"
+        # Let's search for the 'include' directory containing opus.h
+        $foundOpusHeadersDir = Get-ChildItem -Path $tempDir -Filter "opus.h" -Recurse | Select-Object -ExpandProperty DirectoryName | Select-Object -First 1
+
+        if ($foundOpusHeadersDir) {
+            Copy-Item -Path (Join-Path -Path $foundOpusHeadersDir -ChildPath "*.h") -Destination $pjIncludeOpusDir
+            Write-Host "Copied Opus headers from $($foundOpusHeadersDir) to $pjIncludeOpusDir"
         } else {
-            Write-Host "##[warning]Warning: Opus include directory not found at $extractedIncludeDir after extraction. Headers might be missing."
+            Write-Host "##[warning]Warning: Opus 'opus.h' header file not found within the extracted contents of the Opus release. Headers might be missing."
         }
+
     - name: 6. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
