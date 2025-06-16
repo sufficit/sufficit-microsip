@@ -72,6 +72,12 @@ jobs:
           scripts/build_pjsip.ps1 -SlnFile $pjSlnPath
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
+          # --- DEBUG: Listar conteúdo da pasta de inclusão pjsip-apps/include do PJSIP após compilação ---
+          Write-Host "--- DEBUG: Conteúdo de external/pjproject/pjsip-apps/include/ após compilação PJSIP ---"
+          Get-ChildItem -Path "pjsip-apps/include" -Recurse | Select-Object FullName
+          Write-Host "-----------------------------------------------------------------------------------"
+          # --------------------------------------------------------------------------------------------
+
           # Voltar para o diretório raiz do MicroSIP
           Set-Location $env:GITHUB_WORKSPACE
         env:
@@ -100,6 +106,12 @@ jobs:
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjsip-apps/include" -Destination "$microsipPjLibDir/pjsip-apps/include" -Force
 
           Write-Host "Componentes PJSIP copiados para $microsipPjLibDir."
+
+          # --- DEBUG: Listar conteúdo da pasta de inclusão pjsip-apps/include do MicroSIP após cópia ---
+          Write-Host "--- DEBUG: Conteúdo de lib/pjproject/pjsip-apps/include/ após cópia para MicroSIP ---"
+          Get-ChildItem -Path "$microsipPjLibDir/pjsip-apps/include" -Recurse | Select-Object FullName
+          Write-Host "--------------------------------------------------------------------------------"
+          # ------------------------------------------------------------------------------------------
 
       # Step 6: Patch microsip.vcxproj para incluir PJSIP paths
       # O script 'patch_microsip_vcxproj.ps1' é assumido como existente na pasta 'scripts/'
