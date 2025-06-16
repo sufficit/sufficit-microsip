@@ -11,12 +11,13 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.29
+# Action Version: 1.0.30
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **FIXED: Alterado o separador de caminho no `build.yml` para barras normais (`/`)**
-#     **na chamada `pwsh -Command` para `download_opus_windows.ps1`. Isso resolve o erro de**
-#     **reconhecimento do termo `\` e melhora a compatibilidade com o PowerShell.**
+#   - **FIXED: Simplificada a chamada para `download_opus_windows.ps1` para usar execução direta (`&`)**
+#     **no bloco `run` do PowerShell, eliminando o invólucro `pwsh -Command`. Isso resolve a**
+#     **interpretação incorreta de caracteres de escape e barras invertidas no caminho,**
+#     **melhorando a robustez da chamada do script.**
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -86,9 +87,8 @@ jobs:
           Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP..."
           # O script download_opus_windows.ps1 está na raiz do repositório principal (sufficit-microsip)
           # Por isso, o caminho deve ser relativo ao GITHUB_WORKSPACE
-          # Envolver a chamada do script em um bloco de comando pwsh para que o 'param' seja reconhecido
-          # Usando forward slashes para o caminho para evitar problemas de interpretação no PowerShell
-          pwsh -Command "& \"$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1\" -GitHubToken \"$env:GH_PAT\""
+          # Usar a execução direta do script Powershell com o operador de chamada (&)
+          & "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
 
