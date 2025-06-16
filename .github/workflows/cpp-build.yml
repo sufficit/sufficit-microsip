@@ -11,12 +11,12 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.31
+# Action Version: 1.0.32
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **FIXED: A chamada para `download_opus_windows.ps1` no `build.yml` foi corrigida para passar**
-#     **o caminho do script diretamente sem aspas internas e os parâmetros em separado.**
-#     **Isso garante que a palavra-chave `param` seja corretamente reconhecida pelo PowerShell.**
+#   - **FIXED: A chamada para `download_opus_windows.ps1` no `build.yml` foi corrigida para usar**
+#     **"dot-sourcing" (`.`) para executar o script. Isso garante que a palavra-chave `param`**
+#     **seja corretamente reconhecida pelo PowerShell no contexto do `run` block, resolvendo o erro.**
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -86,8 +86,8 @@ jobs:
           Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP..."
           # O script download_opus_windows.ps1 está na raiz do repositório principal (sufficit-microsip)
           # Por isso, o caminho deve ser relativo ao GITHUB_WORKSPACE
-          # Chamada corrigida para o script, passando o caminho diretamente e os parâmetros separados
-          & "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
+          # Usar dot-sourcing para executar o script e garantir que 'param' é reconhecido
+          . "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
 
