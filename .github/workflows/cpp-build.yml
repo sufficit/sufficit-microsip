@@ -93,39 +93,53 @@ jobs:
           $scriptPath = "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1"
           $tempScriptPath = "temp_download_opus.ps1"
 
-          # Tentativas anteriores para resolver o erro "param is not recognized" e "Unauthorized":
+          # Histórico de tentativas para resolver o erro "param is not recognized" e "Unauthorized":
+          #
           # 1. Chamada direta com & e aspas duplas (tentativa original):
           #    & "$env:GITHUB_WORKSPACE\scripts\download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
           #    Problema: O PowerShell interpretava a barra invertida como escape dentro da string,
           #              ou o 'param' não era reconhecido por não ser um bloco de script explícito.
           #              Isso resultava em "The term '\' is not recognized".
-
+          #
           # 2. Envolver a chamada em um bloco `pwsh -Command` (tentativa):
           #    pwsh -Command "& \"$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1\" -GitHubToken \"$env:GH_PAT\""
           #    Problema: Embora a sintaxe para 'param' fosse tecnicamente correta para um scriptblock,
           #              a interpolação de variáveis e aspas dentro da string ainda causavam problemas de análise.
           #              Ainda resultava em "The term 'param' is not recognized" e/ou "The term '\' is not recognized".
-
+          #
           # 3. Usar 'pwsh -File' (tentativa mais recente e padrão):
           #    pwsh -File "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
-          #    Problema: Apesar de ser a forma recomendada, o erro 'param' não reconhecido persistiu,
-          #              indicando que, mesmo com o '-File', a interpretação inicial do script falhava,
-          #              possivelmente devido a um ambiente muito sensível ou caracteres invisíveis.
-
+          #    Problema: Apesar de ser a forma recomendada, o erro 'param' não reconhecido persistiu. Isso indicava
+          #              que, mesmo com o '-File', a interpretação inicial do script falhava, possivelmente devido
+          #              a um ambiente muito sensível ou a caracteres invisíveis.
+          #
           # 4. Usar Dot-Sourcing (`. $scriptPath`):
           #    . $scriptPath -GitHubToken "$env:GH_PAT"
-          #    Problema: Mesmo o dot-sourcing falhou com o erro 'param' não reconhecido, o que sugere um
-          #              problema mais fundamental com a análise do ficheiro em si pelo PowerShell.
-          #              As verificações de depuração mostraram que o ficheiro era encontrado e parecia ter
-          #              a codificação correta, mas o erro persistia.
-
+          #    Problema: Mesmo o dot-sourcing falhou com o erro 'param' não reconhecido, o que sugeria um
+          #              problema mais fundamental com a análise do ficheiro em si pelo PowerShell. As verificações
+          #              de depuração mostraram que o ficheiro era encontrado e parecia ter a codificação correta,
+          #              mas o erro persistia.
+          #
+          # 5. Ler conteúdo do script e executar inline com `pwsh -Command "$scriptContent ..."`:
+          #    $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8
+          #    pwsh -Command "$scriptContent -GitHubToken '$env:GH_PAT'"
+          #    Problema: Esta abordagem resultou no erro "The term 'param' is not recognized", o que é
+          #              extremamente incomum, pois `pwsh -Command` deve interpretar o conteúdo da string
+          #              diretamente como código PowerShell. Isso reforça a hipótese de um problema de
+          #              caracteres invisíveis ou de codificação subtil no próprio ficheiro `download_opus_windows.ps1`
+          #              que persiste mesmo após a leitura com -Encoding UTF8.
+          #
           # Solução proposta atual: Ler o conteúdo do script original, escrevê-lo para um novo ficheiro
-          # temporário no diretório de execução e, em seguida, executar esse ficheiro temporário.
-          # Isso elimina quaisquer potenciais problemas de permissão ou de interpretação de ficheiros
-          # que possam surgir do processo de checkout inicial do Git ou da forma como o ficheiro é lido
-          # diretamente do repositório.
+          # temporário no diretório de execução (garantindo UTF-8 sem BOM através da classe .NET) e,
+          # em seguida, executar esse ficheiro temporário.
+          # Esta abordagem tenta garantir que o ficheiro executado é "limpo" de quaisquer problemas
+          # de codificação ou de processamento de ficheiros pelo Git no ambiente do runner.
+          # A codificação UTF8WithoutBOM causou um erro anterior, agora usamos a sintaxe completa da classe .NET.
+          
           $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8 # Garante que a leitura é UTF8
-          Set-Content -Path $tempScriptPath -Value $scriptContent -Encoding UTF8WithoutBOM # Escreve como UTF8 sem BOM
+          # Usa a classe .NET para criar uma codificação UTF8 sem BOM
+          $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+          Set-Content -Path $tempScriptPath -Value $scriptContent -Encoding $utf8NoBomEncoding
 
           # Agora, execute o ficheiro temporário
           pwsh -File $tempScriptPath -GitHubToken "$env:GH_PAT"
