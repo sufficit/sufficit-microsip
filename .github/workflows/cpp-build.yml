@@ -110,19 +110,20 @@ jobs:
           $pjsipLibPath = "lib/pjproject" # Caminho relativo da PJSIP para as libs
           $pjsipIncludeRoot = "lib/pjproject" # Caminho relativo da PJSIP para os includes (raiz da estrutura copiada)
 
-          # Criação de um novo script PowerShell para esta finalidade
-          $patchMicrosipScriptContent = @"
+          # Salva o script de patch para um ficheiro temporário
+          # O conteúdo do script é agora diretamente escrito para o ficheiro, evitando o here-string em YAML
+          @"
 # =================================================================================================
 # PATCH SCRIPT FOR MicroSIP PROJECT FILE (CALLED BY GITHUB ACTIONS WORKFLOW)
 #
 # This script adds PJSIP include and library paths to microsip.vcxproj.
 # =================================================================================================
 param (
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=`$true)]
     [string]`$ProjFile,
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=`$true)]
     [string]`$PjsipIncludeRoot, # e.g., 'lib/pjproject'
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=`$true)]
     [string]`$PjsipLibRoot # e.g., 'lib/pjproject'
 )
 
@@ -256,13 +257,10 @@ try {
     Write-Host "##[error]Error patching `$(`$ProjFile): `$(`$_.Exception.Message)"
     exit 1
 }
-"@
-          # Save the patch script to a temporary file
-          $patchMicrosipScriptPath = "scripts/patch_microsip_vcxproj.ps1"
-          $patchMicrosipScriptContent | Out-File -FilePath $patchMicrosipScriptPath -Encoding ASCII -Force
+"@ | Out-File -FilePath $patchMicrosipScriptPath -Encoding ASCII -Force
 
           # Execute the patch script
-          Write-Host "Executing $patchMicrosipScriptPath on $microsipVcxprojPath"
+          Write-Host "Executando $patchMicrosipScriptPath em $microsipVcxprojPath"
           # Ambos PjsipIncludeRoot e PjsipLibRoot apontam para o mesmo diretório base 'lib/pjproject'
           & $patchMicrosipScriptPath -ProjFile $microsipVcxprojPath -PjsipIncludeRoot $pjsipIncludeRoot -PjsipLibRoot $pjsipLibPath
           if ($LASTEXITCODE -ne 0) { exit 1 }
