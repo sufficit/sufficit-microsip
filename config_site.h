@@ -19,6 +19,6 @@
 
 // Explicitly define platform/architecture for broader compatibility
 #define _WIN32
-#define _M_X64 // Changed from _M_IX86 to _M_X64
+#define _M_X64 
 
 #include <pj/config_site_sample.h>

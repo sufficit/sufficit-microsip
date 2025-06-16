@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 59 (Targeting Windows 64-bit (x64) compilation)
+# Version: 60 (Fixed 'param' error in patch.ps1, ensuring it runs as a no-op script)
 #
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
@@ -72,7 +72,7 @@ jobs:
     - name: 6. Build Opus Library
       shell: pwsh
       run: |
-        cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A x64 # Changed -A Win32 to -A x64
+        cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A x64
         cmake --build opus-build --config Release
 
     - name: 7. Copy Opus Headers to PJSIP Include Path
@@ -154,7 +154,7 @@ jobs:
     - name: 13. Build the final project
       shell: pwsh
       # Now executing from the root, as checkout was simplified.
-      run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x64 # Changed /p:Platform=x86 to /p:Platform=x64
+      run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x64
 
     - name: 14. Upload build artifact
       uses: actions/upload-artifact@v4
