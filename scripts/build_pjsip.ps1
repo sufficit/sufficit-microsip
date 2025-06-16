@@ -1,10 +1,22 @@
+# =================================================================================================
+# BUILD SCRIPT FOR PJSIP SOLUTION (CALLED BY GITHUB ACTIONS WORKFLOW)
+#
+# Author: Hugo Castro de Deco, Sufficit
+# Collaboration: Gemini AI for Google
+# Date: June 15, 2025
+# Version: 1
+#
+# This script builds the PJSIP solution using MSBuild, ensuring the correct configuration
+# and platform are applied.
+# =================================================================================================
+
 param (
     [string]$SlnFile # Path to the PJSIP solution file, e.g., pjproject/pjproject-vs14.sln
 )
 
 $solutionPath = $SlnFile
 $configuration = "Release"
-$platform = "Win32" # Explicitly targeting Win32
+$platform = "x64" # Changed from "Win32" to "x64"
 
 # Path to msbuild.exe
 # Ensure msbuild is in the PATH or provide a full path if necessary
