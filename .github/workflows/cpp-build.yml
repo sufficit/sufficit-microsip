@@ -11,11 +11,17 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.25
+# Action Version: 1.0.28
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **Added `contents: read` permission to the job to allow downloading Opus artifacts**
-#     **from another repository, resolving the 401 Unauthorized error.**
+#   - **FIXED: Alterada a chamada para `download_opus_windows.ps1` no `build.yml` para envolver**
+#     **a chamada do script em um bloco de comando `pwsh -Command "{ & '...' -param 'value'}"`**
+#     **Isso garante que o `param` seja interpretado corretamente e o token seja passado.**
+#   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
+#     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
+#     `401 Unauthorized` errors for cross-repository access.
+#   - Added `contents: read` permission to the job to allow downloading Opus artifacts
+#     from another repository, resolving the 401 Unauthorized error.
 #   - Changed 'config_site.h' and 'pjsip_extra_defines.h' generation to direct file copying
 #     from pre-existing files in 'scripts/' to resolve persistent C preprocessor errors.
 #   - Ensured all comments in the code are in English.
@@ -69,6 +75,8 @@ jobs:
       # Step 4: Compilar PJSIP
       - name: Build PJSIP
         shell: pwsh
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }} # Define GH_PAT a partir dos segredos do repositório
         run: |
           # Navegar para o diretório PJSIP
           Set-Location external/pjproject
@@ -78,7 +86,8 @@ jobs:
           Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP..."
           # O script download_opus_windows.ps1 está na raiz do repositório principal (sufficit-microsip)
           # Por isso, o caminho deve ser relativo ao GITHUB_WORKSPACE
-          & "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1"
+          # Envolver a chamada do script em um bloco de comando pwsh para que o 'param' seja reconhecido
+          pwsh -Command "& \"$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1\" -GitHubToken \"$env:GH_PAT\""
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
 
