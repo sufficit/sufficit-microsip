@@ -2,12 +2,14 @@
 # GitHub Actions Workflow: Compilação do MicroSIP no Windows com Opus
 #
 # Este fluxo de trabalho automatiza a compilação do projeto MicroSIP para Windows (x64),
-# incorporando as bibliotecas Opus pré-compiladas.
+# incorporando as bibliotecas Opus pré-compiladas e a própria biblioteca PJSIP.
 #
-# Assume-se que o script 'scripts/download_opus_windows.ps1' está presente no repositório.
+# Assume-se que:
+# - O script 'scripts/download_opus_windows.ps1' está presente no repositório.
+# - A PJSIP é compilada a partir de 'sufficit/pjproject' dentro do workflow.
 # =================================================================================================
 
-name: Compilar MicroSIP no Windows (com Opus)
+name: Compilar MicroSIP no Windows (com Opus e PJSIP)
 
 on:
   push:
@@ -25,32 +27,253 @@ jobs:
       - name: Checkout do Repositório MicroSIP
         uses: actions/checkout@v4
         with:
-          repository: sufficit/sufficit-microsip # Substitua se o repositório for diferente
+          repository: sufficit/sufficit-microsip
           path: . # Checkout para a raiz do workspace
-          submodules: recursive # Clona submodules, se houver
+          submodules: recursive
 
-      # Step 2: Descarregar e preparar bibliotecas Opus usando o script existente
-      - name: Descarregar e Preparar Bibliotecas Opus
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Necessário para autenticação na API do GitHub
-        run: scripts/download_opus_windows.ps1 # Executa o script para descarregar Opus
-        shell: pwsh
+      # Step 2: Checkout do repositório PJSIP
+      - name: Checkout do Repositório PJSIP
+        uses: actions/checkout@v4
+        with:
+          repository: sufficit/pjproject
+          path: external/pjproject # Checkout PJSIP para um subdiretório
+          submodules: recursive
 
       # Step 3: Adicionar MSBuild ao PATH do ambiente
       - name: Adicionar MSBuild ao Path
         uses: microsoft/setup-msbuild@v2
 
-      # Step 4: Compilar a solução MicroSIP
-      # Ajuste o caminho do ficheiro de solução (.sln) conforme necessário para o seu projeto MicroSIP.
-      # Exemplo: Se o ficheiro for 'MicroSIP/MicroSIP.sln' ou 'build/vs/microsip.sln'
-      - name: Compilar Solução MicroSIP
+      # Step 4: Preparar e Compilar PJSIP
+      - name: Preparar e Compilar PJSIP
         shell: pwsh
         run: |
-          $microsipSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "MicroSIP.sln" # Exemplo: Ajuste para o caminho real da sua solução
+          # Navegar para o diretório PJSIP
+          Set-Location external/pjproject
+
+          # Descarregar e preparar bibliotecas Opus para PJSIP
+          Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP..."
+          scripts/download_opus_windows.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          # Copiar ficheiros de configuração PJSIP
+          Write-Host "Copiando config_site.h e pjsip_extra_defines.h para PJSIP..."
+          Copy-Item -Path "scripts/config_site_content.h" -Destination "pjlib/include/pj/config_site.h" -Force
+          Copy-Item -Path "scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
+
+          # Patch PJSIP pjmedia_codec.vcxproj para definições x64 e Opus
+          Write-Host "Patching pjmedia_codec.vcxproj para PJSIP..."
+          $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjmedia/build/pjmedia_codec.vcxproj"
+          scripts/patch.ps1 -ProjFile $pjmedia_codec_vcxproj_path
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          # Compilar a solução PJSIP
+          Write-Host "Compilando solução PJSIP..."
+          $pjSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/build/vs/pjproject-vs14.sln"
+          scripts/build_pjsip.ps1 -SlnFile $pjSlnPath
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          # Voltar para o diretório raiz do MicroSIP
+          Set-Location $env:GITHUB_WORKSPACE
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Necessário para autenticação na API do GitHub
+
+      # Step 5: Copiar componentes PJSIP compilados para o MicroSIP
+      - name: Copiar Componentes PJSIP para MicroSIP
+        shell: pwsh
+        run: |
+          $pjsipSourceDir = "external/pjproject"
+          $microsipPjLibDir = "lib/pjproject" # Novo diretório para as libs do PJSIP dentro do MicroSIP
+          New-Item -ItemType Directory -Path $microsipPjLibDir -Force
+
+          Write-Host "Copiando bibliotecas PJSIP (.lib) para MicroSIP..."
+          # Copia todos os .lib da pasta 'lib' do PJSIP para a nova pasta 'lib/pjproject' do MicroSIP
+          Copy-Item -Path "$pjsipSourceDir/lib/*.lib" -Destination "$microsipPjLibDir/" -Force
+
+          Write-Host "Copiando ficheiros de inclusão PJSIP para MicroSIP..."
+          # A estrutura de inclusão da PJSIP é complexa. Copia as pastas relevantes.
+          Copy-Item -Recurse -Path "$pjsipSourceDir/pjlib/include" -Destination "$microsipPjLibDir/pjlib/include" -Force
+          Copy-Item -Recurse -Path "$pjsipSourceDir/pjlib-util/include" -Destination "$microsipPjLibDir/pjlib-util/include" -Force
+          Copy-Item -Recurse -Path "$pjsipSourceDir/pjnath/include" -Destination "$microsipPjLibDir/pjnath/include" -Force
+          Copy-Item -Recurse -Path "$pjsipSourceDir/pjmedia/include" -Destination "$microsipPjLibDir/pjmedia/include" -Force
+          Copy-Item -Recurse -Path "$pjsipSourceDir/pjsip/include" -Destination "$microsipPjLibDir/pjsip/include" -Force
+          # Esta pasta é crucial, pois contém 'pjsua-lib'
+          Copy-Item -Recurse -Path "$pjsipSourceDir/pjsip-apps/include" -Destination "$microsipPjLibDir/pjsip-apps/include" -Force
+
+          Write-Host "Componentes PJSIP copiados para $microsipPjLibDir."
+
+      # Step 6: Patch microsip.vcxproj para incluir PJSIP paths
+      # Este é um NOVO script PowerShell que será gerado e executado.
+      - name: Patch microsip.vcxproj para PJSIP
+        shell: pwsh
+        run: |
+          $microsipVcxprojPath = "microsip.vcxproj" # Caminho do .vcxproj do MicroSIP
+          $pjsipLibPath = "lib/pjproject" # Caminho relativo da PJSIP para as libs
+          $pjsipIncludeRoot = "lib/pjproject" # Caminho relativo da PJSIP para os includes (raiz da estrutura copiada)
+
+          # Criação de um novo script PowerShell para esta finalidade
+          $patchMicrosipScriptContent = @"
+# =================================================================================================
+# PATCH SCRIPT FOR MicroSIP PROJECT FILE (CALLED BY GITHUB ACTIONS WORKFLOW)
+#
+# This script adds PJSIP include and library paths to microsip.vcxproj.
+# =================================================================================================
+param (
+    [Parameter(Mandatory=$true)]
+    [string]`$ProjFile,
+    [Parameter(Mandatory=$true)]
+    [string]`$PjsipIncludeRoot, # e.g., 'lib/pjproject'
+    [Parameter(Mandatory=$true)]
+    [string]`$PjsipLibRoot # e.g., 'lib/pjproject'
+)
+
+Write-Host "Executing patch script for MicroSIP: `$ProjFile"
+
+try {
+    [xml]`$projXml = Get-Content `$ProjFile
+
+    `$nsManager = New-Object System.Xml.XmlNamespaceManager(`$projXml.NameTable)
+    `$nsManager.AddNamespace("msbuild", "http://schemas.microsoft.com/developer/msbuild/2003")
+
+    # Target the main project's ClCompile and Linker configurations
+    # We target Release|x64 specifically for includes and libraries
+    `$clCompileNode = `$projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:ClCompile", `$nsManager)
+    `$linkerNode = `$projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:Link", `$nsManager)
+
+    if (`$clCompileNode) {
+        # Add PJSIP include directories
+        `$additionalIncludeDirsNode = `$clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", `$nsManager)
+        `$pjsipIncludes = @(
+            Join-Path -Path `$PjsipIncludeRoot -ChildPath "pjlib/include"
+            Join-Path -Path `$PjsipIncludeRoot -ChildPath "pjlib-util/include"
+            Join-Path -Path `$PjsipIncludeRoot -ChildPath "pjnath/include"
+            Join-Path -Path `$PjsipIncludeRoot -ChildPath "pjmedia/include"
+            Join-Path -Path `$PjsipIncludeRoot -ChildPath "pjsip/include"
+            Join-Path -Path `$PjsipIncludeRoot -ChildPath "pjsip-apps/include" # This contains pjsua-lib
+        )
+        `$pjsipIncludeString = `$pjsipIncludes | ForEach-Object { "`$_;" }
+        `$pjsipIncludeString = `$pjsipIncludeString -join ''
+
+        if (`$additionalIncludeDirsNode) {
+            `$currentIncludes = `$additionalIncludeDirsNode.'#text'
+            # Only add if not already present
+            `$newIncludes = `$currentIncludes
+            foreach (`$includePath in `$pjsipIncludes) {
+                if (`$currentIncludes -notmatch [regex]::Escape(`$includePath)) {
+                    `$newIncludes = "`$includePath;`$newIncludes"
+                }
+            }
+            if (`$newIncludes -ne `$currentIncludes) {
+                `$additionalIncludeDirsNode.'#text' = "`$newIncludes;%(AdditionalIncludeDirectories)"
+                Write-Host "Updated AdditionalIncludeDirectories in `$ProjFile to include PJSIP."
+            } else {
+                Write-Host "PJSIP include paths already present in AdditionalIncludeDirectories."
+            }
+        } else {
+            `$newIncludeNode = `$projXml.CreateElement("AdditionalIncludeDirectories", `$nsManager.LookupNamespace("msbuild"))
+            `$newIncludeNode.'#text' = "`$pjsipIncludeString;%(AdditionalIncludeDirectories)"
+            `$clCompileNode.AppendChild(`$newIncludeNode)
+            Write-Host "Added AdditionalIncludeDirectories node with PJSIP paths in `$ProjFile."
+        }
+    } else {
+        Write-Host "##[warning]Warning: Could not find ClCompile node for Release|x64 in `$ProjFile. Skipping include path update."
+    }
+
+    if (`$linkerNode) {
+        # Add PJSIP library directories
+        `$additionalLibraryDirsNode = `$linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", `$nsManager)
+        `$pjsipLibPath = `$PjsipLibRoot # This should be the 'lib' folder where .lib files are
+
+        if (`$additionalLibraryDirsNode) {
+            `$currentLibDirs = `$additionalLibraryDirsNode.'#text'
+            if (`$currentLibDirs -notmatch [regex]::Escape(`$pjsipLibPath)) {
+                `$additionalLibraryDirsNode.'#text' = "`$pjsipLibPath;`$currentLibDirs"
+                Write-Host "Updated AdditionalLibraryDirectories in `$ProjFile to include PJSIP lib path."
+            } else {
+                Write-Host "PJSIP library path already present in AdditionalLibraryDirectories."
+            }
+        } else {
+            `$newLibNode = `$projXml.CreateElement("AdditionalLibraryDirectories", `$nsManager.LookupNamespace("msbuild"))
+            `$newLibNode.'#text' = "`$pjsipLibPath;%(AdditionalLibraryDirectories)"
+            `$linkerNode.AppendChild(`$newLibNode)
+            Write-Host "Added AdditionalLibraryDirectories node with PJSIP lib path in `$ProjFile."
+        }
+
+        # Add PJSIP additional dependencies (libraries)
+        `$additionalDependenciesNode = `$linkerNode.SelectSingleNode("./msbuild:AdditionalDependencies", `$nsManager)
+        `$pjsipLibs = @(
+            "pjlib-test.lib"
+            "pjlib-util-test.lib"
+            "pjnath-test.lib"
+            "pjmedia-test.lib"
+            "pjsip-test.lib"
+            "pjsip-ua-test.lib"
+            "pjsip-simple-test.lib"
+            "pjsua-lib.lib" # Crucial for pjsua.h
+            "libopus.lib" # From our opus download
+            # Common Windows libs that PJSIP might need for linking
+            "ws2_32.lib"
+            "advapi32.lib"
+            "iphlpapi.lib"
+            "mswsock.lib"
+            "ole32.lib"
+            "winmm.lib"
+            "user32.lib"
+            "gdi32.lib"
+            "crypt32.lib"
+            "dnsapi.lib"
+            # Add any other specific PJSIP libraries your MicroSIP build needs
+        )
+        `$pjsipLibsString = `$pjsipLibs | ForEach-Object { "`$_;" }
+        `$pjsipLibsString = `$pjsipLibsString -join ''
+
+        if (`$additionalDependenciesNode) {
+            `$currentDependencies = `$additionalDependenciesNode.'#text'
+            `$newDependencies = `$currentDependencies
+            foreach (`$lib in `$pjsipLibs) {
+                if (`$currentDependencies -notmatch [regex]::Escape(`$lib)) {
+                    `$newDependencies = "`$lib;`$newDependencies"
+                }
+            }
+            if (`$newDependencies -ne `$currentDependencies) {
+                `$additionalDependenciesNode.'#text' = "`$newDependencies;%(AdditionalDependencies)"
+                Write-Host "Updated AdditionalDependencies in `$ProjFile to include PJSIP libraries."
+            } else {
+                Write-Host "PJSIP libraries already present in AdditionalDependencies."
+            }
+        } else {
+            `$newDepNode = `$projXml.CreateElement("AdditionalDependencies", `$nsManager.LookupNamespace("msbuild"))
+            `$newDepNode.'#text' = "`$pjsipLibsString;%(AdditionalDependencies)"
+            `$linkerNode.AppendChild(`$newDepNode)
+            Write-Host "Added AdditionalDependencies node with PJSIP libraries in `$ProjFile."
+        }
+    } else {
+        Write-Host "##[warning]Warning: Could not find Linker node for Release|x64 in `$ProjFile. Skipping library path and dependencies update."
+    }
+
+    `$projXml.Save(`$ProjFile)
+    Write-Host "Successfully patched `$ProjFile."
+} catch {
+    Write-Host "##[error]Error patching `$(`$ProjFile): `$(`$_.Exception.Message)"
+    exit 1
+}
+"@
+          # Save the patch script to a temporary file
+          $patchMicrosipScriptPath = "scripts/patch_microsip_vcxproj.ps1"
+          $patchMicrosipScriptContent | Out-File -FilePath $patchMicrosipScriptPath -Encoding ASCII -Force
+
+          # Execute the patch script
+          Write-Host "Executing $patchMicrosipScriptPath on $microsipVcxprojPath"
+          # Ambos PjsipIncludeRoot e PjsipLibRoot apontam para o mesmo diretório base 'lib/pjproject'
+          & $patchMicrosipScriptPath -ProjFile $microsipVcxprojPath -PjsipIncludeRoot $pjsipIncludeRoot -PjsipLibRoot $pjsipLibPath
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # Step 7: Compilar a solução MicroSIP (final)
+      - name: Compilar Solução MicroSIP (Final)
+        shell: pwsh
+        run: |
+          # O caminho da solução deve ser relativo à raiz do workspace, pois estamos de volta à raiz
+          $microsipSlnPath = "MicroSIP.sln" # Assumindo que MicroSIP.sln está na raiz do repositório
           Write-Host "Compilando solução MicroSIP: $microsipSlnPath"
-          # O comando msbuild.exe irá tentar compilar a solução.
-          # Usamos /t:Build para compatibilidade com diferentes tipos de projeto.
-          # O /m para multi-processamento pode acelerar a compilação.
           msbuild.exe "$microsipSlnPath" /p:Configuration=Release /p:Platform=x64 /m /t:Build
           if ($LASTEXITCODE -ne 0) {
               Write-Host "##[error]A compilação do MicroSIP falhou com o código de saída $LASTEXITCODE."
@@ -58,8 +281,7 @@ jobs:
           }
           Write-Host "Compilação do MicroSIP concluída com sucesso."
 
-      # Step 5: Opcional: Upload de artefatos da compilação do MicroSIP
-      # Adapte os caminhos para os binários gerados pelo MicroSIP.
+      # Step 8: Opcional: Upload de artefatos da compilação do MicroSIP
       - name: Upload de Binários do MicroSIP
         uses: actions/upload-artifact@v4
         with:
@@ -67,6 +289,6 @@ jobs:
           path: |
             bin/Release/*.exe # Exemplo: Ajuste para o caminho onde os executáveis do MicroSIP são gerados
             bin/Release/*.dll
-            lib/*.lib # Incluir bibliotecas resultantes da compilação
+            lib/pjproject/*.lib # libs PJSIP copiadas para aqui
             # Adicione outros arquivos importantes, se necessário
           retention-days: 7
