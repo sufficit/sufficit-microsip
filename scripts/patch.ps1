@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 4 (Fixed ParserError and ensured correct variable interpolation in catch block)
+# Version: 5 (Fixed ParserError in catch block interpolation by explicitly casting to string)
 #
 # This script is intended to apply specific patches to PJSIP project files,
 # such as adjusting include paths or build settings.
@@ -56,7 +56,7 @@ try {
     }
 
 } catch {
-    # Corrected variable interpolation in the error message
-    Write-Host "##[error]Error patching $ProjFile: $($_.Exception.Message)"
+    # Corrected variable interpolation in the error message for robustness
+    Write-Host "##[error]Error patching $($ProjFile): $($_.Exception.Message)"
     exit 1
 }
