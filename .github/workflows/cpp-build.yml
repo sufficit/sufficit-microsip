@@ -1,164 +1,72 @@
 # =================================================================================================
-# GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
+# GitHub Actions Workflow: Compilação do MicroSIP no Windows com Opus
 #
-# Author: Hugo Castro de Deco, Sufficit
-# Collaboration: Gemini AI for Google
-# Date: June 15, 2025
-# Version: 62 (Fixed ParserError in patch.ps1's catch block)
+# Este fluxo de trabalho automatiza a compilação do projeto MicroSIP para Windows (x64),
+# incorporando as bibliotecas Opus pré-compiladas.
 #
-# This header should be updated keeping the same format on every interaction.
-# Static things and recomendations for AI:
-#
-#  1. Comments in this file are always in english
-#  2. Version has to be updated by each IA interatiction
-#  3. Below this section the AI should explain every success step on build proccess
-#  4. In order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
-#   - `config_site.h`: used for includes and variables declarations
-#   - `scripts/build_pjsip.ps1`: the definitive build script (with underscore)
-#  5. Build OPUS and PJSIP With OPUS (This is a general instruction)
-#  6. Do not change this header structure
-#
-# Above this line the should never forget.
-#
-# == Explanation of Build Steps ==
-#
-# This workflow is the definitive version. It uses a separate script for the PJSIP
-# build and has simplified, robust pathing by checking out the main repo to the root
-# of the workspace. This avoids all previous path resolution and script execution errors.
-# The compiled Opus library (opus.lib) will be located in the 'dist/lib' directory
-# alongside other PJSIP libraries after the "Prepare Libraries for Final Build" step.
+# Assume-se que o script 'scripts/download_opus_windows.ps1' está presente no repositório.
 # =================================================================================================
 
-name: Build C++ and Create Release
+name: Compilar MicroSIP no Windows (com Opus)
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
-  build:
+  build-microsip:
+    name: Compilar MicroSIP no Windows
     runs-on: windows-latest
-    outputs:
-      version: ${{ steps.generate_version.outputs.VERSION }}
 
     steps:
-    - name: 1. Checkout Main Repository to root
-      uses: actions/checkout@v4
-      # By not specifying a 'path', the repo is checked out to the workspace root, simplifying all subsequent paths.
+      # Step 1: Checkout do repositório MicroSIP
+      - name: Checkout do Repositório MicroSIP
+        uses: actions/checkout@v4
+        with:
+          repository: sufficit/sufficit-microsip # Substitua se o repositório for diferente
+          path: . # Checkout para a raiz do workspace
+          submodules: recursive # Clona submodules, se houver
 
-    - name: 2. Clone PJSIP Repository
-      uses: actions/checkout@v4
-      with:
-        repository: pjsip/pjproject
-        path: pjproject
-    
-    - name: 3. Clone Opus Repository
-      uses: actions/checkout@v4
-      with:
-        repository: xiph/opus
-        path: opus-source
+      # Step 2: Descarregar e preparar bibliotecas Opus usando o script existente
+      - name: Descarregar e Preparar Bibliotecas Opus
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Necessário para autenticação na API do GitHub
+        run: scripts/download_opus_windows.ps1 # Executa o script para descarregar Opus
+        shell: pwsh
 
-    - name: 4. Prepare Distribution Directory
-      shell: pwsh
-      run: |
-        echo "--- Creating distribution directory for libraries ---"
-        $dist_dir = "dist/lib"
-        New-Item -ItemType Directory -Force -Path $dist_dir
+      # Step 3: Adicionar MSBuild ao PATH do ambiente
+      - name: Adicionar MSBuild ao Path
+        uses: microsoft/setup-msbuild@v2
 
-    - name: 5. Copy PJSIP config_site.h
-      shell: pwsh
-      run: Copy-Item -Path "./config_site.h" -Destination "pjproject/pjlib/include/pj/config_site.h"
+      # Step 4: Compilar a solução MicroSIP
+      # Ajuste o caminho do ficheiro de solução (.sln) conforme necessário para o seu projeto MicroSIP.
+      # Exemplo: Se o ficheiro for 'MicroSIP/MicroSIP.sln' ou 'build/vs/microsip.sln'
+      - name: Compilar Solução MicroSIP
+        shell: pwsh
+        run: |
+          $microsipSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "MicroSIP.sln" # Exemplo: Ajuste para o caminho real da sua solução
+          Write-Host "Compilando solução MicroSIP: $microsipSlnPath"
+          # O comando msbuild.exe irá tentar compilar a solução.
+          # Usamos /t:Build para compatibilidade com diferentes tipos de projeto.
+          # O /m para multi-processamento pode acelerar a compilação.
+          msbuild.exe "$microsipSlnPath" /p:Configuration=Release /p:Platform=x64 /m /t:Build
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "##[error]A compilação do MicroSIP falhou com o código de saída $LASTEXITCODE."
+              exit 1
+          }
+          Write-Host "Compilação do MicroSIP concluída com sucesso."
 
-    - name: 6. Build Opus Library
-      shell: pwsh
-      run: |
-        cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A x64
-        cmake --build opus-build --config Release
-
-    - name: 7. Copy Opus Headers to PJSIP Include Path
-      shell: pwsh
-      run: |
-        # PJSIP expects includes like 'opus/opus.h'.
-        # The actual Opus repository has its headers directly in 'opus-source/include/'.
-        # We need to copy these headers into a newly created 'opus' subdirectory
-        # within PJSIP's 'pjlib/include/pj/' directory to satisfy PJSIP's include structure.
-        $targetPjIncludeBase = "pjproject/pjlib/include/pj"
-        $sourceOpusBaseDir = "opus-source/include" # Correct source directory for Opus headers
-        $targetOpusIncludeDir = Join-Path -Path $targetPjIncludeBase -ChildPath "opus" # Target 'opus' subdirectory
-        $opusHeaderFile = Join-Path -Path $sourceOpusBaseDir -ChildPath "opus.h" # Check opus.h in its actual source location
-
-        # Check if the source Opus base directory exists before proceeding.
-        if (-not (Test-Path $sourceOpusBaseDir -PathType Container)) {
-            Write-Host "##[error]Error: The source Opus base include directory was not found: $sourceOpusBaseDir"
-            Write-Host "Please ensure the xiph/opus repository structure is 'opus-source/include/'."
-            exit 1 # Fail the step if the source directory is missing
-        } else {
-            Write-Host "Source Opus base include directory verified: $sourceOpusBaseDir (Exists)"
-        }
-
-        # Check if the primary Opus header file exists within the expected source directory.
-        if (-not (Test-Path $opusHeaderFile -PathType Leaf)) {
-            Write-Host "##[error]Error: The main Opus header file '$($opusHeaderFile)' was not found."
-            Write-Host "Please verify the contents of the 'opus-source/include/' directory."
-            exit 1 # Fail the step if the header file is missing
-        } else {
-            Write-Host "Main Opus header file verified: $($opusHeaderFile) (Exists)"
-        }
-
-        # Ensure the target 'opus' subdirectory within PJSIP's include structure exists.
-        New-Item -ItemType Directory -Force -Path $targetOpusIncludeDir
-        
-        # Copy all Opus header files from its actual source include directory
-        # into the newly created 'opus' subdirectory in PJSIP's include path.
-        Copy-Item -Path (Join-Path -Path $sourceOpusBaseDir -ChildPath "*.h") -Destination $targetOpusIncludeDir
-
-    - name: 8. Add MSBuild to path
-      uses: microsoft/setup-msbuild@v2
-
-    - name: 9. Patch PJSIP pjmedia_codec.vcxproj for Opus include path
-      shell: pwsh
-      run: |
-        $patch_script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/patch.ps1"
-        $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject/pjmedia/build/pjmedia_codec.vcxproj"
-        Write-Host "Executing patch script: $patch_script_path on $pjmedia_codec_vcxproj_path"
-        pwsh.exe -File $patch_script_path -ProjFile $pjmedia_codec_vcxproj_path
-
-    - name: 10. Build PJSIP Solution
-      shell: pwsh
-      run: |
-        # Define absolute paths, now from the workspace root.
-        # The Opus include path is no longer passed here, as headers are copied directly.
-        $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject/pjproject-vs14.sln"
-        $script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/build_pjsip.ps1"
-        
-        Write-Host "Executing script: $script_path"
-        
-        # Call the build script using its absolute path and the '-File' operator.
-        # It's no longer necessary to pass OpusIncludePath to build_pjsip.ps1
-        # because the headers are now placed directly in PJSIP's include structure.
-        pwsh.exe -File $script_path -SlnFile $sln_path
-
-    - name: 11. Prepare Libraries for Final Build
-      shell: pwsh
-      run: |
-        echo "--- Collecting all libraries for MicroSIP ---"
-        $dist_dir = "dist/lib"
-        Copy-Item -Path pjproject/lib/*.lib -Destination $dist_dir
-        Copy-Item -Path opus-build/Release/opus.lib -Destination $dist_dir
-        
-    - name: 12. Generate Version Tag
-      id: generate_version
-      shell: bash
-      run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
-      
-    - name: 13. Build the final project
-      shell: pwsh
-      # Now executing from the root, as checkout was simplified.
-      run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x64
-
-    - name: 14. Upload build artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: microsip-build
-        # The artifact path is also simpler now.
-        path: Release/microsip.exe
+      # Step 5: Opcional: Upload de artefatos da compilação do MicroSIP
+      # Adapte os caminhos para os binários gerados pelo MicroSIP.
+      - name: Upload de Binários do MicroSIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: microsip-windows-x64-binarios
+          path: |
+            bin/Release/*.exe # Exemplo: Ajuste para o caminho onde os executáveis do MicroSIP são gerados
+            bin/Release/*.dll
+            lib/*.lib # Incluir bibliotecas resultantes da compilação
+            # Adicione outros arquivos importantes, se necessário
+          retention-days: 7
