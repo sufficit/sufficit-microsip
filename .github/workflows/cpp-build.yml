@@ -11,12 +11,12 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.32
+# Action Version: 1.0.34
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **FIXED: A chamada para `download_opus_windows.ps1` no `build.yml` foi corrigida para usar**
-#     **"dot-sourcing" (`.`) para executar o script. Isso garante que a palavra-chave `param`**
-#     **seja corretamente reconhecida pelo PowerShell no contexto do `run` block, resolvendo o erro.**
+#   - FIXED: A chamada para `download_opus_windows.ps1` no `build.yml` foi corrigida para usar
+#     `pwsh -File` para invocar o script diretamente como um arquivo PowerShell. Isso resolve o erro
+#     `'param' is not recognized` e garante a passagem correta de argumentos.
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -86,8 +86,27 @@ jobs:
           Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP..."
           # O script download_opus_windows.ps1 está na raiz do repositório principal (sufficit-microsip)
           # Por isso, o caminho deve ser relativo ao GITHUB_WORKSPACE
-          # Usar dot-sourcing para executar o script e garantir que 'param' é reconhecido
-          . "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
+
+          # Tentativas anteriores para resolver o erro "param is not recognized" e "Unauthorized":
+          # 1. Chamada direta com & e aspas duplas:
+          #    & "$env:GITHUB_WORKSPACE\scripts\download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
+          #    Problema: O PowerShell interpretava a barra invertida como escape dentro da string,
+          #              ou o 'param' não era reconhecido por não ser um bloco de script explícito.
+          # 2. Envolver a chamada em um bloco `pwsh -Command`:
+          #    pwsh -Command "& \"$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1\" -GitHubToken \"$env:GH_PAT\""
+          #    Problema: Embora a sintaxe para 'param' fosse tecnicamente correta para um scriptblock,
+          #              a interpolação de variáveis e aspas dentro da string ainda causavam problemas de análise.
+          #              Ainda resultava em "The term '\' is not recognized".
+          # 3. Usar dot-sourcing (.):
+          #    . "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
+          #    Problema: Embora o dot-sourcing execute o script no escopo atual, e devesse resolver o 'param'
+          #              não reconhecido, em alguns ambientes de CI com Powershell 7+ e como o run block é tratado,
+          #              ainda pode haver problemas de parsing da linha completa quando a string é muito complexa.
+          #              Isso foi experimentado como "The term 'param' is not recognized" novamente em alguns logs.
+
+          # Solução atual: Usar 'pwsh -File' para garantir que o script é tratado como um arquivo executável
+          # e os parâmetros são passados de forma limpa.
+          pwsh -File "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
 
