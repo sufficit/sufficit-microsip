@@ -49,28 +49,48 @@ jobs:
         run: |
           # Navegar para o diretório PJSIP
           Set-Location external/pjproject
+          Write-Host "Caminho atual Set-Location: $(Get-Location)"
 
           # Descarregar e preparar bibliotecas Opus para PJSIP
           Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP..."
           scripts/download_opus_windows.ps1
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Manter a verificação para este script, pois é uma dependência externa
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "##[error]download_opus_windows.ps1 falhou com exit code $LASTEXITCODE."
+              exit 1
+          }
+          Write-Host "Scripts/download_opus_windows.ps1 concluído."
 
           # Copiar ficheiros de configuração PJSIP
           Write-Host "Copiando config_site.h e pjsip_extra_defines.h para PJSIP..."
           Copy-Item -Path "scripts/config_site_content.h" -Destination "pjlib/include/pj/config_site.h" -Force
           Copy-Item -Path "scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
+          Write-Host "Ficheiros de configuração PJSIP copiados."
 
           # Patch PJSIP pjmedia_codec.vcxproj para definições x64 e Opus
           Write-Host "Patching pjmedia_codec.vcxproj para PJSIP..."
           $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjmedia/build/pjmedia_codec.vcxproj"
           scripts/patch.ps1 -ProjFile $pjmedia_codec_vcxproj_path
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Manter a verificação para este script
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "##[error]scripts/patch.ps1 para pjmedia_codec.vcxproj falhou com exit code $LASTEXITCODE."
+              exit 1
+          }
+          Write-Host "pjmedia_codec.vcxproj patched."
 
           # Compilar a solução PJSIP
           Write-Host "Compilando solução PJSIP..."
           $pjSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/build/vs/pjproject-vs14.sln"
+          # Temporariamente, não sair em caso de erro aqui para ver o output do MSBuild
           scripts/build_pjsip.ps1 -SlnFile $pjSlnPath
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Apenas loga o código de saída, para ver o que o MSBuild imprimiu
+          Write-Host "scripts/build_pjsip.ps1 concluído com LASTEXITCODE: $LASTEXITCODE."
+          # Se o build do PJSIP falhar, ainda precisamos que a etapa falhe.
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "##[error]A compilação da solução PJSIP falhou."
+              exit 1
+          }
+          Write-Host "Compilação PJSIP concluída."
 
           # --- DEBUG: Listar conteúdo da pasta de inclusão pjsip-apps/include do PJSIP após compilação ---
           Write-Host "--- DEBUG: Conteúdo de external/pjproject/pjsip-apps/include/ após compilação PJSIP ---"
@@ -80,6 +100,7 @@ jobs:
 
           # Voltar para o diretório raiz do MicroSIP
           Set-Location $env:GITHUB_WORKSPACE
+          Write-Host "Voltando ao diretório raiz do MicroSIP: $(Get-Location)"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Necessário para autenticação na API do GitHub
 
@@ -90,10 +111,12 @@ jobs:
           $pjsipSourceDir = "external/pjproject"
           $microsipPjLibDir = "lib/pjproject" # Novo diretório para as libs do PJSIP dentro do MicroSIP
           New-Item -ItemType Directory -Path $microsipPjLibDir -Force
+          Write-Host "Criado diretório de destino PJSIP para MicroSIP: $microsipPjLibDir"
 
           Write-Host "Copiando bibliotecas PJSIP (.lib) para MicroSIP..."
           # Copia todos os .lib da pasta 'lib' do PJSIP para a nova pasta 'lib/pjproject' do MicroSIP
           Copy-Item -Path "$pjsipSourceDir/lib/*.lib" -Destination "$microsipPjLibDir/" -Force
+          Write-Host "Bibliotecas PJSIP .lib copiadas."
 
           Write-Host "Copiando ficheiros de inclusão PJSIP para MicroSIP..."
           # A estrutura de inclusão da PJSIP é complexa. Copia as pastas relevantes.
@@ -104,6 +127,7 @@ jobs:
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjsip/include" -Destination "$microsipPjLibDir/pjsip/include" -Force
           # Esta pasta é crucial, pois contém 'pjsua-lib'
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjsip-apps/include" -Destination "$microsipPjLibDir/pjsip-apps/include" -Force
+          Write-Host "Ficheiros de inclusão PJSIP copiados."
 
           Write-Host "Componentes PJSIP copiados para $microsipPjLibDir."
 
@@ -129,6 +153,7 @@ jobs:
           # Ambos PjsipIncludeRoot e PjsipLibRoot apontam para o mesmo diretório base 'lib/pjproject'
           & $patchMicrosipScriptPath -ProjFile $microsipVcxprojPath -PjsipIncludeRoot $pjsipIncludeRoot -PjsipLibRoot $pjsipLibPath
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "Patch microsip.vcxproj concluído."
 
       # Step 7: Compilar a solução MicroSIP (final)
       - name: Compilar Solução MicroSIP (Final)
