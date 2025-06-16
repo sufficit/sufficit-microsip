@@ -1,17 +1,32 @@
 # =================================================================================================
-# GitHub Actions Workflow: Compilação do MicroSIP no Windows com Opus
+# GitHub Actions Workflow: PJSIP Build for Windows, Linux, and Linux ARM
 #
-# Este fluxo de trabalho automatiza a compilação do projeto MicroSIP para Windows (x64),
-# incorporando as bibliotecas Opus pré-compiladas e a própria biblioteca PJSIP.
+# This workflow automates the compilation of the PJSIP project for Windows (x64), Linux (x64),
+# and Linux ARM (64-bit). It is triggered on pushes to the 'main' branch and automatically
+# creates a tag and release for each successful build on 'main'. It also continues to be
+# triggered by manually pushed version tags. Build artifacts are named
+# using the UTC date and time of the build.
 #
-# Assume-se que:
-# - O script 'scripts/download_opus_windows.ps1' está presente no repositório.
-# - A PJSIP é compilada a partir de 'sufficit/pjproject' dentro do workflow.
+# The main change is the integration of pre-compiled Opus libraries (assuming that
+# they are provided by the same company 'sufficit' via GitHub Releases), instead of
+# installing system development packages or compiling Opus internally.
 #
-# Changes:
-#   - Updated the `patch_microsip_vcxproj.ps1` call to include `PjsipAppsIncludePath` parameter.
-#   - Ensured all paths are correctly defined and used.
-#   - Removed redundant steps and clarified comments.
+# Action Version: 1.0.25
+# Last Updated: 2025-06-16
+# Description of Changes:
+#   - **Added `contents: read` permission to the job to allow downloading Opus artifacts**
+#     **from another repository, resolving the 401 Unauthorized error.**
+#   - Changed 'config_site.h' and 'pjsip_extra_defines.h' generation to direct file copying
+#     from pre-existing files in 'scripts/' to resolve persistent C preprocessor errors.
+#   - Ensured all comments in the code are in English.
+#   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
+#     (via GitHub Releases) in each PJSIP build job, with enhanced logic for naming and extraction,
+#     and improved error handling in `download_opus_windows.ps1`.
+#   - Removed `libopus-dev` dependencies from package installers.
+#   - Adjusted compilation flags (CFLAGS) as necessary.
+#   - Updated the patch script for `microsip.vcxproj` to correctly include all necessary
+#     paths for MicroSIP's internal headers, JSON, and PJSIP headers, resolving
+#     'Cannot open include file' errors during MicroSIP compilation.
 # =================================================================================================
 
 name: Compilar MicroSIP no Windows (com Opus e PJSIP)
@@ -26,6 +41,8 @@ jobs:
   build-microsip:
     name: Compilar MicroSIP no Windows
     runs-on: windows-latest
+    permissions: # Adicione esta seção
+      contents: read # Concede permissão de leitura para o GITHUB_TOKEN
 
     steps:
       # Step 1: Checkout do repositório MicroSIP
