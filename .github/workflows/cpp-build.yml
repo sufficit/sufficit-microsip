@@ -112,7 +112,8 @@ jobs:
 
           # Salva o script de patch para um ficheiro temporário
           # O conteúdo do script é agora diretamente escrito para o ficheiro, evitando o here-string em YAML
-          @"
+          # Use o pipe '|' para um bloco literal de string no YAML
+          Write-Output @"
 # =================================================================================================
 # PATCH SCRIPT FOR MicroSIP PROJECT FILE (CALLED BY GITHUB ACTIONS WORKFLOW)
 #
