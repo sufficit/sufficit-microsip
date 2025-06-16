@@ -4,12 +4,14 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 16, 2025
-# Version: 5 (Added support for passing GitHub Token as parameter)
+# Version: 6 (Made GitHubToken parameter optional and explicitly initialized)
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
 #
 # Changes:
+#   - **FIXED: Changed `param([string]$GitHubToken)` to `param([string]$GitHubToken = "")` to**
+#     **make the parameter optional and ensure it's always initialized, resolving 'variable not set' error.**
 #   - Now accepts a GitHub Token as a parameter for authenticated API requests, improving
 #     reliability for cross-repository access.
 #   - Improved robustness for finding and copying Opus header files, searching recursively.
@@ -23,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 param(
-    [string]$GitHubToken # New parameter for the GitHub Token
+    [string]$GitHubToken = "" # Parameter now optional and defaults to empty string
 )
 
 $REPO_OWNER="sufficit"
