@@ -2,6 +2,9 @@
 # PATCH SCRIPT FOR MicroSIP PROJECT FILE (CALLED BY GITHUB ACTIONS WORKFLOW)
 #
 # This script adds PJSIP include and library paths to microsip.vcxproj.
+#
+# Changes:
+#   - Added new parameter -PjsipAppsIncludePath to explicitly include the path for pjsua.h.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -9,7 +12,9 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$PjsipIncludeRoot, # e.g., 'lib/pjproject'
     [Parameter(Mandatory=$true)]
-    [string]$PjsipLibRoot # e.g., 'lib/pjproject'
+    [string]$PjsipLibRoot, # e.g., 'lib/pjproject'
+    [Parameter(Mandatory=$true)] # Novo parâmetro
+    [string]$PjsipAppsIncludePath # e.g., 'lib/pjproject/pjsip/include' (onde pjsua.h pode estar)
 )
 
 Write-Host "Executing patch script for MicroSIP: $ProjFile"
@@ -34,7 +39,7 @@ try {
             Join-Path -Path $PjsipIncludeRoot -ChildPath "pjnath/include"
             Join-Path -Path $PjsipIncludeRoot -ChildPath "pjmedia/include"
             Join-Path -Path $PjsipIncludeRoot -ChildPath "pjsip/include"
-            Join-Path -Path $PjsipIncludeRoot -ChildPath "pjsip-apps/include" # This contains pjsua-lib
+            $PjsipAppsIncludePath # Adiciona o novo caminho para pjsua.h
         )
         $pjsipIncludeString = $pjsipIncludes | ForEach-Object { "$_;" }
         $pjsipIncludeString = $pjsipIncludeString -join ''
@@ -45,7 +50,7 @@ try {
             $newIncludes = $currentIncludes
             foreach ($includePath in $pjsipIncludes) {
                 if ($currentIncludes -notmatch [regex]::Escape($includePath)) {
-                    $newIncludes = "$includePath;$newIncludes"
+                    $newIncludes = "$includePath;`$newIncludes"
                 }
             }
             if ($newIncludes -ne $currentIncludes) {

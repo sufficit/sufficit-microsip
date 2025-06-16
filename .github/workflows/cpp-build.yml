@@ -105,21 +105,21 @@ jobs:
           Write-Host "Bibliotecas PJSIP .lib copiadas."
 
           Write-Host "Copiando ficheiros de inclusão PJSIP para MicroSIP..."
-          # ESTES CAMINHOS SERÃO AJUSTADOS APÓS ANÁLISE DO DEBUG OUTPUT DA ETAPA ANTERIOR
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjlib/include" -Destination "$microsipPjLibDir/pjlib/include" -Force
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjlib-util/include" -Destination "$microsipPjLibDir/pjlib-util/include" -Force
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjnath/include" -Destination "$microsipPjLibDir/pjnath/include" -Force
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjmedia/include" -Destination "$microsipPjLibDir/pjmedia/include" -Force
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjsip/include" -Destination "$microsipPjLibDir/pjsip/include" -Force
-          # ESTE É O CAMINHO PROBLEMÁTICO: Será corrigido com base no DEBUG
-          Copy-Item -Recurse -Path "$pjsipSourceDir/pjsip-apps/include" -Destination "$microsipPjLibDir/pjsip-apps/include" -ErrorAction Stop -Force
+          # Removida a linha que copiava pjsip-apps/include, pois a pasta não existe.
+          # O pjsua.h será referenciado diretamente no patch do .vcxproj
+
           Write-Host "Ficheiros de inclusão PJSIP copiados."
 
           Write-Host "Componentes PJSIP copiados para $microsipPjLibDir."
 
           # --- DEBUG: Listar conteúdo da pasta de inclusão pjsip-apps/include do MicroSIP após cópia ---
           Write-Host "--- DEBUG: Conteúdo de lib/pjproject/pjsip-apps/include/ após cópia para MicroSIP ---"
-          Get-ChildItem -Path "$microsipPjLibDir/pjsip-apps/include" -Recurse | Select-Object FullName
+          Get-ChildItem -Path "$microsipPjLibDir/pjsip-apps/include" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
           Write-Host "--------------------------------------------------------------------------------"
           # ------------------------------------------------------------------------------------------
 
@@ -133,8 +133,17 @@ jobs:
 
           $patchMicrosipScriptPath = "scripts/patch_microsip_vcxproj.ps1"
 
+          # O conteúdo do script patch_microsip_vcxproj.ps1 está a ser modificado implicitamente aqui.
+          # Adicionaremos o caminho de inclusão pjsua-lib diretamente dentro dele.
           Write-Host "Executando $patchMicrosipScriptPath em $microsipVcxprojPath"
-          & $patchMicrosipScriptPath -ProjFile $microsipVcxprojPath -PjsipIncludeRoot $pjsipIncludeRoot -PjsipLibRoot $pjsipLibPath
+          # Adicione o caminho específico para o pjsua.h que está em pjsip/include,
+          # e não pjsip-apps/include que não existe.
+          # Esta é a chamada para o script que foi gerado anteriormente
+          & $patchMicrosipScriptPath -ProjFile $microsipVcxprojPath `
+              -PjsipIncludeRoot $pjsipIncludeRoot `
+              -PjsipLibRoot $pjsipLibPath `
+              -PjsipAppsIncludePath (Join-Path -Path $pjsipIncludeRoot -ChildPath "pjsip/include") # Novo parâmetro
+
           Write-Host "Patch microsip.vcxproj concluído."
 
       # Step 7: Compilar a solução MicroSIP (final)
