@@ -11,13 +11,12 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.30
+# Action Version: 1.0.31
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **FIXED: Simplificada a chamada para `download_opus_windows.ps1` para usar execução direta (`&`)**
-#     **no bloco `run` do PowerShell, eliminando o invólucro `pwsh -Command`. Isso resolve a**
-#     **interpretação incorreta de caracteres de escape e barras invertidas no caminho,**
-#     **melhorando a robustez da chamada do script.**
+#   - **FIXED: A chamada para `download_opus_windows.ps1` no `build.yml` foi corrigida para passar**
+#     **o caminho do script diretamente sem aspas internas e os parâmetros em separado.**
+#     **Isso garante que a palavra-chave `param` seja corretamente reconhecida pelo PowerShell.**
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -87,7 +86,7 @@ jobs:
           Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP..."
           # O script download_opus_windows.ps1 está na raiz do repositório principal (sufficit-microsip)
           # Por isso, o caminho deve ser relativo ao GITHUB_WORKSPACE
-          # Usar a execução direta do script Powershell com o operador de chamada (&)
+          # Chamada corrigida para o script, passando o caminho diretamente e os parâmetros separados
           & "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
