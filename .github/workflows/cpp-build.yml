@@ -53,12 +53,9 @@ jobs:
 
           # Descarregar e preparar bibliotecas Opus para PJSIP
           Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP..."
+          # O try-catch no script interno 'download_opus_windows.ps1' já lida com o erro,
+          # e 'throw' faz com que esta etapa falhe automaticamente se ocorrer um erro.
           scripts/download_opus_windows.ps1
-          # Manter a verificação para este script, pois é uma dependência externa
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "##[error]download_opus_windows.ps1 falhou com exit code $LASTEXITCODE."
-              exit 1
-          }
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
 
           # Copiar ficheiros de configuração PJSIP
@@ -70,25 +67,22 @@ jobs:
           # Patch PJSIP pjmedia_codec.vcxproj para definições x64 e Opus
           Write-Host "Patching pjmedia_codec.vcxproj para PJSIP..."
           $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjmedia/build/pjmedia_codec.vcxproj"
+          # O try-catch no script interno 'patch.ps1' já lida com o erro,
+          # e 'throw' faz com que esta etapa falhe automaticamente se ocorrer um erro.
           scripts/patch.ps1 -ProjFile $pjmedia_codec_vcxproj_path
-          # Manter a verificação para este script
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "##[error]scripts/patch.ps1 para pjmedia_codec.vcxproj falhou com exit code $LASTEXITCODE."
-              exit 1
-          }
           Write-Host "pjmedia_codec.vcxproj patched."
 
           # Compilar a solução PJSIP
           Write-Host "Compilando solução PJSIP..."
           $pjSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/build/vs/pjproject-vs14.sln"
-          # Temporariamente, não sair em caso de erro aqui para ver o output do MSBuild
+          # O script 'build_pjsip.ps1' já contém o try-catch para o MSBuild e lida com o exit code.
           scripts/build_pjsip.ps1 -SlnFile $pjSlnPath
-          # Apenas loga o código de saída, para ver o que o MSBuild imprimiu
+          # O resultado do build_pjsip.ps1 é que determinará o $LASTEXITCODE para esta etapa.
+          # Se build_pjsip.ps1 retornar um erro, esta etapa irá falhar.
           Write-Host "scripts/build_pjsip.ps1 concluído com LASTEXITCODE: $LASTEXITCODE."
-          # Se o build do PJSIP falhar, ainda precisamos que a etapa falhe.
           if ($LASTEXITCODE -ne 0) {
               Write-Host "##[error]A compilação da solução PJSIP falhou."
-              exit 1
+              exit 1 # Força a falha da etapa se o script interno já indicou falha
           }
           Write-Host "Compilação PJSIP concluída."
 
@@ -150,9 +144,9 @@ jobs:
 
           # Executa o script de patch existente
           Write-Host "Executando $patchMicrosipScriptPath em $microsipVcxprojPath"
-          # Ambos PjsipIncludeRoot e PjsipLibRoot apontam para o mesmo diretório base 'lib/pjproject'
+          # O script 'patch_microsip_vcxproj.ps1' já contém o try-catch para o MSBuild e lida com o exit code.
           & $patchMicrosipScriptPath -ProjFile $microsipVcxprojPath -PjsipIncludeRoot $pjsipIncludeRoot -PjsipLibRoot $pjsipLibPath
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Se patch_microsip_vcxproj.ps1 retornar um erro, esta etapa irá falhar automaticamente.
           Write-Host "Patch microsip.vcxproj concluído."
 
       # Step 7: Compilar a solução MicroSIP (final)
