@@ -40,8 +40,12 @@ jobs:
           submodules: recursive
 
       # Step 3: Adicionar MSBuild ao PATH do ambiente
-      - name: Adicionar MSBuild ao Path
+      - name: Add MSBuild to Path
         uses: microsoft/setup-msbuild@v2
+        with:
+          # Para garantir que o MSBuild para x64 é usado
+          msbuild-architecture: x64
+
 
       # Step 4: Preparar e Compilar PJSIP
       - name: Preparar e Compilar PJSIP
@@ -96,53 +100,56 @@ jobs:
         shell: pwsh
         run: |
           $pjsipSourceDir = "external/pjproject"
-          $microsipPjLibDir = "lib/pjproject"
+          $microsipPjLibDir = "lib/pjproject" # Novo diretório para as libs do PJSIP dentro do MicroSIP
           New-Item -ItemType Directory -Path $microsipPjLibDir -Force
           Write-Host "Criado diretório de destino PJSIP para MicroSIP: $microsipPjLibDir"
 
           Write-Host "Copiando bibliotecas PJSIP (.lib) para MicroSIP..."
+          # Copia todos os .lib da pasta 'lib' do PJSIP para a nova pasta 'lib/pjproject' do MicroSIP
           Copy-Item -Path "$pjsipSourceDir/lib/*.lib" -Destination "$microsipPjLibDir/" -Force
           Write-Host "Bibliotecas PJSIP .lib copiadas."
 
           Write-Host "Copiando ficheiros de inclusão PJSIP para MicroSIP..."
+          # Copia as pastas de inclusão de cada módulo PJSIP
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjlib/include" -Destination "$microsipPjLibDir/pjlib/include" -Force
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjlib-util/include" -Destination "$microsipPjLibDir/pjlib-util/include" -Force
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjnath/include" -Destination "$microsipPjLibDir/pjnath/include" -Force
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjmedia/include" -Destination "$microsipPjLibDir/pjmedia/include" -Force
           Copy-Item -Recurse -Path "$pjsipSourceDir/pjsip/include" -Destination "$microsipPjLibDir/pjsip/include" -Force
-          # Removida a linha que copiava pjsip-apps/include, pois a pasta não existe.
-          # O pjsua.h será referenciado diretamente no patch do .vcxproj
+          # A linha anterior que tentava copiar pjsip-apps/include foi REMOVIDA.
+          # O pjsua.h está localizado dentro de pjsip/include/pjsua-lib/, que já será copiado acima.
 
           Write-Host "Ficheiros de inclusão PJSIP copiados."
 
           Write-Host "Componentes PJSIP copiados para $microsipPjLibDir."
 
           # --- DEBUG: Listar conteúdo da pasta de inclusão pjsip-apps/include do MicroSIP após cópia ---
-          Write-Host "--- DEBUG: Conteúdo de lib/pjproject/pjsip-apps/include/ após cópia para MicroSIP ---"
-          Get-ChildItem -Path "$microsipPjLibDir/pjsip-apps/include" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
+          # Esta pasta pode não existir se o pjsua.h estiver diretamente em pjsip/include/.
+          # Usamos -ErrorAction SilentlyContinue para evitar falha se a pasta não for criada.
+          Write-Host "--- DEBUG: Conteúdo de lib/pjproject/pjsip/include/pjsua-lib/ após cópia para MicroSIP ---"
+          Get-ChildItem -Path "$microsipPjLibDir/pjsip/include/pjsua-lib" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
           Write-Host "--------------------------------------------------------------------------------"
           # ------------------------------------------------------------------------------------------
 
       # Step 6: Patch microsip.vcxproj para incluir PJSIP paths
+      # O script 'patch_microsip_vcxproj.ps1' é assumido como existente na pasta 'scripts/'
       - name: Patch microsip.vcxproj para PJSIP
         shell: pwsh
         run: |
-          $microsipVcxprojPath = "microsip.vcxproj"
-          $pjsipLibPath = "lib/pjproject"
-          $pjsipIncludeRoot = "lib/pjproject"
+          $microsipVcxprojPath = "microsip.vcxproj" # Caminho do .vcxproj do MicroSIP
+          $pjsipLibPath = "lib/pjproject" # Caminho relativo da PJSIP para as libs
+          $pjsipIncludeRoot = "lib/pjproject" # Caminho relativo da PJSIP para os includes (raiz da estrutura copiada)
 
           $patchMicrosipScriptPath = "scripts/patch_microsip_vcxproj.ps1"
 
-          # O conteúdo do script patch_microsip_vcxproj.ps1 está a ser modificado implicitamente aqui.
-          # Adicionaremos o caminho de inclusão pjsua-lib diretamente dentro dele.
           Write-Host "Executando $patchMicrosipScriptPath em $microsipVcxprojPath"
           # Adicione o caminho específico para o pjsua.h que está em pjsip/include,
           # e não pjsip-apps/include que não existe.
-          # Esta é a chamada para o script que foi gerado anteriormente
+          # Passamos o caminho onde o pjsua.h está realmente (lib/pjproject/pjsip/include)
           & $patchMicrosipScriptPath -ProjFile $microsipVcxprojPath `
               -PjsipIncludeRoot $pjsipIncludeRoot `
               -PjsipLibRoot $pjsipLibPath `
-              -PjsipAppsIncludePath (Join-Path -Path $pjsipIncludeRoot -ChildPath "pjsip/include") # Novo parâmetro
+              -PjsipAppsIncludePath (Join-Path -Path $pjsipIncludeRoot -ChildPath "pjsip/include") # Usando este como o caminho de inclusão da pjsua-lib
 
           Write-Host "Patch microsip.vcxproj concluído."
 
@@ -150,7 +157,8 @@ jobs:
       - name: Compilar Solução MicroSIP (Final)
         shell: pwsh
         run: |
-          $microsipSlnPath = "MicroSIP.sln"
+          # O caminho da solução deve ser relativo à raiz do workspace, pois estamos de volta à raiz
+          $microsipSlnPath = "MicroSIP.sln" # Assumindo que MicroSIP.sln está na raiz do repositório
           Write-Host "Compilando solução MicroSIP: $microsipSlnPath"
           msbuild.exe "$microsipSlnPath" /p:Configuration=Release /p:Platform=x64 /m /t:Build
           if ($LASTEXITCODE -ne 0) {
@@ -165,7 +173,8 @@ jobs:
         with:
           name: microsip-windows-x64-binarios
           path: |
-            bin/Release/*.exe
+            bin/Release/*.exe # Exemplo: Ajuste para o caminho onde os executáveis do MicroSIP são gerados
             bin/Release/*.dll
-            lib/pjproject/*.lib
+            lib/pjproject/*.lib # libs PJSIP copiadas para aqui
+            # Adicione outros arquivos importantes, se necessário
           retention-days: 7
