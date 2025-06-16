@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 5 (Fixed ParserError in catch block interpolation by explicitly casting to string)
+# Version: 6 (Corrected SelectSingleNode with XmlNamespaceManager)
 #
 # This script is intended to apply specific patches to PJSIP project files,
 # such as adjusting include paths or build settings.
@@ -21,17 +21,16 @@ try {
     # Load the XML content of the .vcxproj file
     [xml]$projXml = Get-Content $ProjFile
 
-    # Define XML namespace for MSBuild elements
-    $ns = @{ msbuild = 'http://schemas.microsoft.com/developer/msbuild/2003' }
+    # Create an XmlNamespaceManager and add the MSBuild namespace
+    $nsManager = New-Object System.Xml.XmlNamespaceManager($projXml.NameTable)
+    $nsManager.AddNamespace("msbuild", "http://schemas.microsoft.com/developer/msbuild/2003")
 
-    # Select the ClCompile node for Release|x64 configuration
-    # This selects the <ItemDefinitionGroup> that has Condition containing 'Release' and 'x64'
-    # and then selects the <ClCompile> node within it.
-    $clCompileNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:ClCompile", $ns)
+    # Select the ClCompile node for Release|x64 configuration using the namespace manager
+    $clCompileNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:ClCompile", $nsManager)
 
     if ($clCompileNode) {
         # Find or create PreprocessorDefinitions node
-        $preprocessorDefinitionsNode = $clCompileNode.SelectSingleNode("./msbuild:PreprocessorDefinitions", $ns)
+        $preprocessorDefinitionsNode = $clCompileNode.SelectSingleNode("./msbuild:PreprocessorDefinitions", $nsManager)
 
         if ($preprocessorDefinitionsNode) {
             # Prepend _M_X64 and _WIN64 to existing definitions
@@ -42,7 +41,7 @@ try {
             Write-Host "New definitions: $($preprocessorDefinitionsNode.'#text')"
         } else {
             # If PreprocessorDefinitions node doesn't exist, create it
-            $newDefNode = $projXml.CreateElement("PreprocessorDefinitions", $ns.msbuild)
+            $newDefNode = $projXml.CreateElement("PreprocessorDefinitions", $nsManager.LookupNamespace("msbuild"))
             $newDefNode.'#text' = "_M_X64;_WIN64"
             $clCompileNode.AppendChild($newDefNode)
             Write-Host "Added PreprocessorDefinitions for Release|x64 in $ProjFile."
