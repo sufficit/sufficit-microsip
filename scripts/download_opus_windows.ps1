@@ -4,37 +4,35 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 16, 2025
-# Version: 6 (Made GitHubToken parameter optional and explicitly initialized)
+# Version: 7 (Removed 'param' block to bypass parsing issues in CI)
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
 #
-# Changes:
-#   - **FIXED: Changed `param([string]$GitHubToken)` to `param([string]$GitHubToken = "")` to**
-#     **make the parameter optional and ensure it's always initialized, resolving 'variable not set' error.**
-#   - Now accepts a GitHub Token as a parameter for authenticated API requests, improving
-#     reliability for cross-repository access.
-#   - Improved robustness for finding and copying Opus header files, searching recursively.
-#   - Added Set-StrictMode and ErrorActionPreference for better error handling.
-#   - Added cleanup of the temporary download directory (external_libs/opus_temp).
-#   - Fixed: Variable interpolation in error message by using ${} for clarity.
+# Changes in Version 7:
+#   - Removed the 'param' block. The GitHubToken is now directly read from the environment
+#     variable GH_PAT. This is a workaround to bypass a persistent "param is not recognized" error
+#     in the GitHub Actions runner environment, which seems to be related to PowerShell's parsing
+#     of the 'param' keyword in specific CI contexts.
+#   - Explicitly using $env:GH_PAT for the authentication token.
 # =================================================================================================
 
 # Enforce stricter parsing and error handling
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-param(
-    [string]$GitHubToken = "" # Parameter now optional and defaults to empty string
-)
+# Parameter removed - GitHubToken is now read directly from environment variable
+# param(
+#     [string]$GitHubToken = ""
+# )
 
 $REPO_OWNER="sufficit"
 $REPO_NAME="opus"
 $ARTIFACT_PREFIX="opus-windows-x64"
 $ARTIFACT_EXT=".zip"
 
-# Use the provided GitHubToken if available, otherwise fallback to GITHUB_TOKEN environment variable (less preferred for cross-repo)
-$authToken = if (-not [string]::IsNullOrEmpty($GitHubToken)) { $GitHubToken } else { $env:GITHUB_TOKEN }
+# Use the GH_PAT environment variable directly as GitHubToken parameter has been removed.
+$authToken = $env:GH_PAT
 
 # Headers for authenticated requests
 $headers = @{}
