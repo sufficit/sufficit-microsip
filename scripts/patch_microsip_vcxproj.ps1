@@ -1,10 +1,15 @@
 # =================================================================================================
 # PATCH SCRIPT FOR MicroSIP PROJECT FILE (CALLED BY GITHUB ACTIONS WORKFLOW)
 #
-# This script adds PJSIP include and library paths to microsip.vcxproj.
+# This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
 # Changes:
-#   - Added new parameter -PjsipAppsIncludePath to explicitly include the path for pjsua.h.
+#   - Now explicitly includes MicroSIP's root directory ($(ProjectDir)) and its 'lib' subdirectory
+#     ($(ProjectDir)lib) for internal headers.
+#   - Includes ($(ProjectDir)lib\jsoncpp) for the json.h header.
+#   - Ensures all PJSIP include paths are correctly prefixed with $(ProjectDir)lib\pjproject\.
+#   - The PjsipAppsIncludePath parameter is now used to ensure pjsua.h (and other pjsip/include)
+#     headers are found correctly by including the pjsip/include path.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -13,7 +18,7 @@ param (
     [string]$PjsipIncludeRoot, # e.g., 'lib/pjproject'
     [Parameter(Mandatory=$true)]
     [string]$PjsipLibRoot, # e.g., 'lib/pjproject'
-    [Parameter(Mandatory=$true)] # Novo parâmetro
+    [Parameter(Mandatory=$true)] # Este parâmetro agora aponta para 'lib/pjproject/pjsip/include'
     [string]$PjsipAppsIncludePath # e.g., 'lib/pjproject/pjsip/include' (onde pjsua.h pode estar)
 )
 
@@ -31,39 +36,50 @@ try {
     $linkerNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:Link", $nsManager)
 
     if ($clCompileNode) {
-        # Add PJSIP include directories
-        $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
-        $pjsipIncludes = @(
-            Join-Path -Path $PjsipIncludeRoot -ChildPath "pjlib/include"
-            Join-Path -Path $PjsipIncludeRoot -ChildPath "pjlib-util/include"
-            Join-Path -Path $PjsipIncludeRoot -ChildPath "pjnath/include"
-            Join-Path -Path $PjsipIncludeRoot -ChildPath "pjmedia/include"
-            Join-Path -Path $PjsipIncludeRoot -ChildPath "pjsip/include"
-            $PjsipAppsIncludePath # Adiciona o novo caminho para pjsua.h
+        # Add ALL necessary include directories:
+        # 1. MicroSIP's own directories
+        # 2. Third-party libraries specifically for MicroSIP (e.g., jsoncpp)
+        # 3. All PJSIP core include directories
+        $requiredIncludes = @(
+            "$(ProjectDir)" # For root headers like stdafx.h, global.h, mainDlg.h
+            "$(ProjectDir)lib" # For headers in MicroSIP's lib folder like MSIP.h, CListCtrl_ToolTip.h, etc.
+            "$(ProjectDir)lib\jsoncpp" # For json.h
+            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjlib/include"    # For pj/types.h, etc.
+            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjlib-util/include"
+            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjnath/include"
+            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjmedia/include"
+            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjsip/include" # Contains pjsua-lib folder and pjsua.h within it
+            # The $PjsipAppsIncludePath is now covered by "$(ProjectDir)$PjsipIncludeRoot\pjsip\include"
+            # as PjsipAppsIncludePath is expected to be "lib/pjproject/pjsip/include" which is derived from $PjsipIncludeRoot
         )
-        $pjsipIncludeString = $pjsipIncludes | ForEach-Object { "$_;" }
-        $pjsipIncludeString = $pjsipIncludeString -join ''
+
+        $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
+
+        # Concatenate and filter out duplicates
+        $currentIncludes = if ($additionalIncludeDirsNode) { $additionalIncludeDirsNode.'#text' } else { "" }
+        $newIncludesArray = $currentIncludes.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
+
+        foreach ($includePath in $requiredIncludes) {
+            # Add only if not already present
+            if ($newIncludesArray -notcontains $includePath) {
+                $newIncludesArray += $includePath
+            }
+        }
+        $newIncludesString = ($newIncludesArray | Select-Object -Unique) -join ';' # Ensure unique and rejoin
 
         if ($additionalIncludeDirsNode) {
-            $currentIncludes = $additionalIncludeDirsNode.'#text'
-            # Only add if not already present
-            $newIncludes = $currentIncludes
-            foreach ($includePath in $pjsipIncludes) {
-                if ($currentIncludes -notmatch [regex]::Escape($includePath)) {
-                    $newIncludes = "$includePath;`$newIncludes"
-                }
-            }
-            if ($newIncludes -ne $currentIncludes) {
-                $additionalIncludeDirsNode.'#text' = "$newIncludes;%(AdditionalIncludeDirectories)"
-                Write-Host "Updated AdditionalIncludeDirectories in $ProjFile to include PJSIP."
+            # Check if actual change is needed to avoid unnecessary file writes
+            if ($newIncludesString -ne $currentIncludes) {
+                $additionalIncludeDirsNode.'#text' = "$newIncludesString;%(AdditionalIncludeDirectories)"
+                Write-Host "Updated AdditionalIncludeDirectories in $ProjFile to include all necessary paths."
             } else {
-                Write-Host "PJSIP include paths already present in AdditionalIncludeDirectories."
+                Write-Host "All necessary include paths already present in AdditionalIncludeDirectories."
             }
         } else {
             $newIncludeNode = $projXml.CreateElement("AdditionalIncludeDirectories", $nsManager.LookupNamespace("msbuild"))
-            $newIncludeNode.'#text' = "$pjsipIncludeString;%(AdditionalIncludeDirectories)"
+            $newIncludeNode.'#text' = "$newIncludesString;%(AdditionalIncludeDirectories)"
             $clCompileNode.AppendChild($newIncludeNode)
-            Write-Host "Added AdditionalIncludeDirectories node with PJSIP paths in $ProjFile."
+            Write-Host "Added AdditionalIncludeDirectories node with all necessary paths in $ProjFile."
         }
     } else {
         Write-Host "##[warning]Warning: Could not find ClCompile node for Release|x64 in $ProjFile. Skipping include path update."
@@ -72,19 +88,19 @@ try {
     if ($linkerNode) {
         # Add PJSIP library directories
         $additionalLibraryDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
-        $pjsipLibPath = $PjsipLibRoot # This should be the 'lib' folder where .lib files are
+        $pjsipLibPathFull = "$(ProjectDir)$PjsipLibRoot" # Full path to the libs folder
 
         if ($additionalLibraryDirsNode) {
             $currentLibDirs = $additionalLibraryDirsNode.'#text'
-            if ($currentLibDirs -notmatch [regex]::Escape($pjsipLibPath)) {
-                $additionalLibraryDirsNode.'#text' = "$pjsipLibPath;$currentLibDirs"
+            if ($currentLibDirs -notmatch [regex]::Escape($pjsipLibPathFull)) {
+                $additionalLibraryDirsNode.'#text' = "$pjsipLibPathFull;$currentLibDirs"
                 Write-Host "Updated AdditionalLibraryDirectories in $ProjFile to include PJSIP lib path."
             } else {
                 Write-Host "PJSIP library path already present in AdditionalLibraryDirectories."
             }
         } else {
             $newLibNode = $projXml.CreateElement("AdditionalLibraryDirectories", $nsManager.LookupNamespace("msbuild"))
-            $newLibNode.'#text' = "$pjsipLibPath;%(AdditionalLibraryDirectories)"
+            $newLibNode.'#text' = "$pjsipLibPathFull;%(AdditionalLibraryDirectories)"
             $linkerNode.AppendChild($newLibNode)
             Write-Host "Added AdditionalLibraryDirectories node with PJSIP lib path in $ProjFile."
         }
