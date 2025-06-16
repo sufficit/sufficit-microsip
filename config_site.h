@@ -4,11 +4,14 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 1
+# Version: 2
 #
 # This file provides custom configuration definitions for PJSIP,
 # including platform-specific settings and feature flags.
 # =================================================================================================
+
+// Define Windows version for API compatibility (e.g., for WASAPI functions)
+#define _WIN32_WINNT 0x0A00 // Target Windows 10 (or later for _WIN32_WINNT_WIN10) - 0x0601 for Win 7, 0x0600 for Win Vista
 
 #define PJ_CONFIG_WIN_AUTO   1
 #define PJ_IS_BIG_ENDIAN     0
