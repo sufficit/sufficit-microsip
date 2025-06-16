@@ -4,30 +4,45 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 16, 2025
-# Version: 4 (Fixed variable interpolation in throw statement)
+# Version: 5 (Added support for passing GitHub Token as parameter)
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
 #
 # Changes:
+#   - Now accepts a GitHub Token as a parameter for authenticated API requests, improving
+#     reliability for cross-repository access.
 #   - Improved robustness for finding and copying Opus header files, searching recursively.
 #   - Added Set-StrictMode and ErrorActionPreference for better error handling.
 #   - Added cleanup of the temporary download directory (external_libs/opus_temp).
-#   - **FIXED: Variable interpolation in error message by using ${} for clarity.**
+#   - Fixed: Variable interpolation in error message by using ${} for clarity.
 # =================================================================================================
 
 # Enforce stricter parsing and error handling
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+param(
+    [string]$GitHubToken # New parameter for the GitHub Token
+)
+
 $REPO_OWNER="sufficit"
 $REPO_NAME="opus"
 $ARTIFACT_PREFIX="opus-windows-x64"
 $ARTIFACT_EXT=".zip"
 
+# Use the provided GitHubToken if available, otherwise fallback to GITHUB_TOKEN environment variable (less preferred for cross-repo)
+$authToken = if (-not [string]::IsNullOrEmpty($GitHubToken)) { $GitHubToken } else { $env:GITHUB_TOKEN }
+
+# Headers for authenticated requests
+$headers = @{}
+if (-not [string]::IsNullOrEmpty($authToken)) {
+    $headers.Add("Authorization", "token $authToken")
+}
+
 Write-Host "Fetching latest release tag from https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
 try {
-    $LATEST_RELEASE_DATA = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" -Headers @{Authorization = "token $env:GITHUB_TOKEN"} -ErrorAction Stop
+    $LATEST_RELEASE_DATA = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" -Headers $headers -ErrorAction Stop
     $LATEST_RELEASE_TAG = $LATEST_RELEASE_DATA.tag_name
     Write-Host "Found latest Opus release tag: $LATEST_RELEASE_TAG"
 }
@@ -53,8 +68,7 @@ foreach ($asset in $LATEST_RELEASE_DATA.assets) {
 }
 
 if (-not $DOWNLOAD_URL) {
-    # Changed variable interpolation to use ${}
-    throw "Não foi possível encontrar o artefato '$EXPECTED_ARTIFACT_NAME' no último lançamento do ${REPO_OWNER}/${REPO_NAME}. Artefatos disponíveis: $($LATEST_RELEASE_DATA.assets.name -join ', ')"
+    throw "Não foi possível encontrar o artefato '${EXPECTED_ARTIFACT_NAME}' no último lançamento do ${REPO_OWNER}/${REPO_NAME}. Artefatos disponíveis: $($LATEST_RELEASE_DATA.assets.name -join ', ')"
 }
 
 Write-Host "Downloading Opus artifact from: $DOWNLOAD_URL"
@@ -66,14 +80,13 @@ $zipFilePath = Join-Path -Path $tempDownloadDir -ChildPath $EXPECTED_ARTIFACT_NA
 New-Item -ItemType Directory -Path $tempDownloadDir -Force | Out-Null
 
 try {
-    Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $zipFilePath -Headers @{Authorization = "token $env:GITHUB_TOKEN"} -ErrorAction Stop
+    Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $zipFilePath -Headers $headers -ErrorAction Stop
 }
 catch {
-    # Changed variable interpolation to use ${}
     throw "Erro ao baixar o artefato Opus de ${DOWNLOAD_URL}: $($_.Exception.Message)"
 }
 
-Write-Host "Extracting $zipFilePath to $tempDownloadDir"
+Write-Host "Extracting ${zipFilePath} to ${tempDownloadDir}"
 try {
     Expand-Archive -Path $zipFilePath -DestinationPath $tempDownloadDir -Force
 }
@@ -81,7 +94,7 @@ catch {
     throw "Erro ao extrair o artefato Opus de ${zipFilePath}: $($_.Exception.Message)"
 }
 
-Write-Host "--- Contents of $tempDownloadDir after extraction (for debugging) ---"
+Write-Host "--- Contents of ${tempDownloadDir} after extraction (for debugging) ---"
 Get-ChildItem -Path $tempDownloadDir -Recurse | Select-Object FullName
 Write-Host "-----------------------------------------------------------------"
 
@@ -99,29 +112,29 @@ $foundOpusLib = Get-ChildItem -Path $tempDownloadDir -Filter "opus.lib" -Recurse
 
 if ($null -ne $foundOpusLib) {
     Copy-Item -Path $foundOpusLib.FullName -Destination $pjsipLibDir -Force
-    Write-Host "Copied opus.lib from $($foundOpusLib.FullName) to $pjsipLibDir"
+    Write-Host "Copied opus.lib from $($foundOpusLib.FullName) to ${pjsipLibDir}"
 } else {
-    throw "opus.lib não encontrado dentro do conteúdo extraído do lançamento Opus ($tempDownloadDir). Por favor, verifique a estrutura do artefato."
+    throw "opus.lib não encontrado dentro do conteúdo extraído do lançamento Opus (${tempDownloadDir}). Por favor, verifique a estrutura do artefato."
 }
 
 # Copy Opus headers to PJSIP's pjlib/include/pj/opus directory
 New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force | Out-Null
 
-Write-Host "Attempting broad recursive search for Opus headers (*.h) in '$tempDownloadDir' and its subdirectories..."
+Write-Host "Attempting broad recursive search for Opus headers (*.h) in '${tempDownloadDir}' and its subdirectories..."
 $foundOpusHeaders = Get-ChildItem -Path $tempDownloadDir -Filter "*.h" -Recurse
 
 if ($null -ne $foundOpusHeaders -and $foundOpusHeaders.Count -gt 0) {
     foreach ($headerFile in $foundOpusHeaders) {
         Copy-Item -Path $headerFile.FullName -Destination $pjIncludeOpusDir -Force
-        Write-Host "Copied header: $($headerFile.FullName) to $pjIncludeOpusDir"
+        Write-Host "Copied header: $($headerFile.FullName) to ${pjIncludeOpusDir}"
     }
     Write-Host "Successfully copied $($foundOpusHeaders.Count) Opus header files."
 } else {
-    Write-Warning "Nenhum arquivo de cabeçalho Opus (*.h) encontrado dentro do conteúdo extraído de $tempDownloadDir. Verifique se o pacote Opus contém os cabeçalhos."
+    Write-Warning "Nenhum arquivo de cabeçalho Opus (*.h) encontrado dentro do conteúdo extraído de ${tempDownloadDir}. Verifique se o pacote Opus contém os cabeçalhos."
 }
 
 # Clean up temporary directory
-Write-Host "Cleaning up temporary directory: $tempDownloadDir"
+Write-Host "Cleaning up temporary directory: ${tempDownloadDir}"
 Remove-Item -Path $tempDownloadDir -Recurse -Force | Out-Null
 
 Write-Host "Opus library and header processing completed."
