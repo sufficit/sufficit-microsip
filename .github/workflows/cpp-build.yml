@@ -86,35 +86,14 @@ jobs:
           Write-Host "PowerShell Version being used:"
           $PSVersionTable | Format-List | Out-String | Write-Host
 
-          # Depuração: Verificar a existência e o conteúdo do script
-          $scriptPath = "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1"
-          Write-Host "Tentando localizar o script: $scriptPath"
-          if (Test-Path $scriptPath) {
-              Write-Host "Script encontrado em $scriptPath"
-              
-              Write-Host "Verificando codificação do script (primeiras 10 linhas, UTF8):"
-              # Lê as primeiras 10 linhas como UTF8 para inspecção visual de caracteres estranhos
-              Get-Content $scriptPath -Encoding UTF8 -TotalCount 10 | ForEach-Object { Write-Host $_ }
-              
-              Write-Host "Verificando bytes brutos do script (primeiros 30 bytes) para BOM:"
-              # Lê os primeiros 30 bytes brutos. UTF-8 BOM é EF BB BF.
-              # Se vir estes bytes no início, indica a presença de BOM.
-              [System.IO.File]::ReadAllBytes($scriptPath) | Select-Object -First 30 | ForEach-Object { "{0:X2}" -f $_ } | Out-String | Write-Host
-
-          } else {
-              Write-Error "Script NÃO ENCONTRADO em $scriptPath. Saindo."
-              exit 1
-          }
-
           # Descarregar e preparar bibliotecas Opus para PJSIP
-          Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP (via dot-sourcing)..."
+          Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP (via ficheiro temporário)..."
           # O script download_opus_windows.ps1 está na raiz do repositório principal (sufficit-microsip)
           # Por isso, o caminho deve ser relativo ao GITHUB_WORKSPACE
-          
-          # Solução proposta: Usar dot-sourcing para executar o script diretamente no ambiente PowerShell
-          # da etapa, evitando a necessidade de um processo 'pwsh -File' aninhado que pode ter problemas de parsing.
-          # As tentativas anteriores de dot-sourcing podem ter falhado devido a outros problemas de ambiente
-          # que foram corrigidos ou que podem ser diagnosticados com as verificações adicionais.
+          $scriptPath = "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1"
+          $tempScriptPath = "temp_download_opus.ps1"
+
+          # Tentativas anteriores para resolver o erro "param is not recognized" e "Unauthorized":
           # 1. Chamada direta com & e aspas duplas (tentativa original):
           #    & "$env:GITHUB_WORKSPACE\scripts\download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
           #    Problema: O PowerShell interpretava a barra invertida como escape dentro da string,
@@ -133,9 +112,23 @@ jobs:
           #              indicando que, mesmo com o '-File', a interpretação inicial do script falhava,
           #              possivelmente devido a um ambiente muito sensível ou caracteres invisíveis.
 
-          # A abordagem de dot-sourcing abaixo é a tentativa mais robusta para garantir que o script
-          # é executado diretamente no contexto do shell PowerShell atual.
-          . $scriptPath -GitHubToken "$env:GH_PAT"
+          # 4. Usar Dot-Sourcing (`. $scriptPath`):
+          #    . $scriptPath -GitHubToken "$env:GH_PAT"
+          #    Problema: Mesmo o dot-sourcing falhou com o erro 'param' não reconhecido, o que sugere um
+          #              problema mais fundamental com a análise do ficheiro em si pelo PowerShell.
+          #              As verificações de depuração mostraram que o ficheiro era encontrado e parecia ter
+          #              a codificação correta, mas o erro persistia.
+
+          # Solução proposta atual: Ler o conteúdo do script original, escrevê-lo para um novo ficheiro
+          # temporário no diretório de execução e, em seguida, executar esse ficheiro temporário.
+          # Isso elimina quaisquer potenciais problemas de permissão ou de interpretação de ficheiros
+          # que possam surgir do processo de checkout inicial do Git ou da forma como o ficheiro é lido
+          # diretamente do repositório.
+          $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8 # Garante que a leitura é UTF8
+          Set-Content -Path $tempScriptPath -Value $scriptContent -Encoding UTF8WithoutBOM # Escreve como UTF8 sem BOM
+
+          # Agora, execute o ficheiro temporário
+          pwsh -File $tempScriptPath -GitHubToken "$env:GH_PAT"
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
 
