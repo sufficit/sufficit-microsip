@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 15, 2025
-# Version: 55 (Added PJ_DONT_NEED_WIN32_VER_HACKS to config_site.h to prevent WinVer redefinition)
+# Version: 56 (Changed Opus compilation to download pre-compiled release from sufficit/opus)
 #
 # This header should be updated keeping the same format on every interaction.
 # Static things and recomendations for AI:
@@ -52,63 +52,67 @@ jobs:
         repository: pjsip/pjproject
         path: pjproject
     
-    - name: 3. Clone Opus Repository
-      uses: actions/checkout@v4
-      with:
-        repository: xiph/opus
-        path: opus-source
+    - name: 3. Prepare Distribution Directory
+      shell: pwsh
+      run: |
+        echo "--- Creating distribution directory for libraries ---"
+        $dist_dir = "dist/lib"
+        New-Item -ItemType Directory -Force -Path $dist_dir
 
     - name: 4. Copy PJSIP config_site.h
       shell: pwsh
       run: Copy-Item -Path "./config_site.h" -Destination "pjproject/pjlib/include/pj/config_site.h"
 
-    - name: 5. Build Opus Library
+    - name: 5. Download and Extract Pre-compiled Opus Libraries and Headers
       shell: pwsh
       run: |
-        cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
-        cmake --build opus-build --config Release
+        $releaseApiUrl = "https://api.github.com/repos/sufficit/opus/releases/latest"
+        $response = Invoke-RestMethod -Uri $releaseApiUrl
+        $assetUrl = ($response.assets | Where-Object { $_.name -like 'Release.zip' }).browser_download_url
 
-    - name: 6. Copy Opus Headers to PJSIP Include Path
-      shell: pwsh
-      run: |
-        # PJSIP expects includes like 'opus/opus.h'.
-        # The actual Opus repository has its headers directly in 'opus-source/include/'.
-        # We need to copy these headers into a newly created 'opus' subdirectory
-        # within PJSIP's 'pjlib/include/pj/' directory to satisfy PJSIP's include structure.
-        $targetPjIncludeBase = "pjproject/pjlib/include/pj"
-        $sourceOpusBaseDir = "opus-source/include" # Correct source directory for Opus headers
-        $targetOpusIncludeDir = Join-Path -Path $targetPjIncludeBase -ChildPath "opus" # Target 'opus' subdirectory
-        $opusHeaderFile = Join-Path -Path $sourceOpusBaseDir -ChildPath "opus.h" # Check opus.h in its actual source location
-
-        # Check if the source Opus base directory exists before proceeding.
-        if (-not (Test-Path $sourceOpusBaseDir -PathType Container)) {
-            Write-Host "##[error]Error: The source Opus base include directory was not found: $sourceOpusBaseDir"
-            Write-Host "Please ensure the xiph/opus repository structure is 'opus-source/include/'."
-            exit 1 # Fail the step if the source directory is missing
-        } else {
-            Write-Host "Source Opus base include directory verified: $sourceOpusBaseDir (Exists)"
+        if (-not $assetUrl) {
+            Write-Host "##[error]Error: Release.zip asset not found in the latest release of sufficit/opus."
+            exit 1
         }
 
-        # Check if the primary Opus header file exists within the expected source directory.
-        if (-not (Test-Path $opusHeaderFile -PathType Leaf)) {
-            Write-Host "##[error]Error: The main Opus header file '$($opusHeaderFile)' was not found."
-            Write-Host "Please verify the contents of the 'opus-source/include/' directory."
-            exit 1 # Fail the step if the header file is missing
+        $tempDir = New-Item -ItemType Directory -Path "opus-extracted" -Force
+        $zipPath = Join-Path -Path $tempDir -ChildPath "Release.zip"
+
+        Write-Host "Downloading Opus release from: $assetUrl"
+        Invoke-WebRequest -Uri $assetUrl -OutFile $zipPath
+
+        Write-Host "Extracting $zipPath to $tempDir"
+        Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+
+        # Define target paths
+        $distDir = "dist/lib" # This directory is created in step 3
+        $pjIncludeOpusDir = "pjproject/pjlib/include/pj/opus"
+
+        # Create necessary Opus include directory inside PJSIP
+        New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force
+
+        # Copy opus.lib
+        $extractedLibPath = Join-Path -Path $tempDir -ChildPath "Release/opus.lib"
+        if (Test-Path $extractedLibPath) {
+            Copy-Item -Path $extractedLibPath -Destination $distDir
+            Write-Host "Copied opus.lib to $distDir"
         } else {
-            Write-Host "Main Opus header file verified: $($opusHeaderFile) (Exists)"
+            Write-Host "##[error]Error: opus.lib not found at $extractedLibPath after extraction."
+            exit 1
         }
 
-        # Ensure the target 'opus' subdirectory within PJSIP's include structure exists.
-        New-Item -ItemType Directory -Force -Path $targetOpusIncludeDir
-        
-        # Copy all Opus header files from its actual source include directory
-        # into the newly created 'opus' subdirectory in PJSIP's include path.
-        Copy-Item -Path (Join-Path -Path $sourceOpusBaseDir -ChildPath "*.h") -Destination $targetOpusIncludeDir
-
-    - name: 7. Add MSBuild to path
+        # Copy Opus headers
+        $extractedIncludeDir = Join-Path -Path $tempDir -ChildPath "include"
+        if (Test-Path $extractedIncludeDir -PathType Container) {
+            Copy-Item -Path (Join-Path -Path $extractedIncludeDir -ChildPath "*.h") -Destination $pjIncludeOpusDir
+            Write-Host "Copied Opus headers from $extractedIncludeDir to $pjIncludeOpusDir"
+        } else {
+            Write-Host "##[warning]Warning: Opus include directory not found at $extractedIncludeDir after extraction. Headers might be missing."
+        }
+    - name: 6. Add MSBuild to path
       uses: microsoft/setup-msbuild@v2
 
-    - name: 8. Patch PJSIP pjmedia_codec.vcxproj for Opus include path
+    - name: 7. Patch PJSIP pjmedia_codec.vcxproj for Opus include path
       shell: pwsh
       run: |
         $patch_script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/patch.ps1"
@@ -116,7 +120,7 @@ jobs:
         Write-Host "Executing patch script: $patch_script_path on $pjmedia_codec_vcxproj_path"
         pwsh.exe -File $patch_script_path -ProjFile $pjmedia_codec_vcxproj_path
 
-    - name: 9. Build PJSIP Solution
+    - name: 8. Build PJSIP Solution
       shell: pwsh
       run: |
         # Define absolute paths, now from the workspace root.
@@ -131,26 +135,25 @@ jobs:
         # because the headers are now placed directly in PJSIP's include structure.
         pwsh.exe -File $script_path -SlnFile $sln_path
 
-    - name: 10. Prepare Libraries for Final Build
+    - name: 9. Prepare Libraries for Final Build
       shell: pwsh
       run: |
         echo "--- Collecting all libraries for MicroSIP ---"
-        $dist_dir = "dist/lib"
-        New-Item -ItemType Directory -Force -Path $dist_dir
+        # dist/lib is already created in step 3
         Copy-Item -Path pjproject/lib/*.lib -Destination $dist_dir
-        Copy-Item -Path opus-build/Release/opus.lib -Destination $dist_dir
+        # Opus library (opus.lib) is already copied to dist/lib in step 5, so no need to copy again from opus-build.
         
-    - name: 11. Generate Version Tag
+    - name: 10. Generate Version Tag
       id: generate_version
       shell: bash
       run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
       
-    - name: 12. Build the final project
+    - name: 11. Build the final project
       shell: pwsh
       # Now executing from the root, as checkout was simplified.
       run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="./dist/lib"
 
-    - name: 13. Upload build artifact
+    - name: 12. Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: microsip-build
