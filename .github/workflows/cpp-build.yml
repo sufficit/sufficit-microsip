@@ -143,7 +143,6 @@ jobs:
       run: |
         echo "--- Collecting all libraries for MicroSIP ---"
         $dist_dir = "dist/lib"
-        # New-Item -ItemType Directory -Force -Path $dist_dir # This is now done in step 4
         Copy-Item -Path pjproject/lib/*.lib -Destination $dist_dir
         Copy-Item -Path opus-build/Release/opus.lib -Destination $dist_dir
         
