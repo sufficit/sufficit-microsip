@@ -74,7 +74,8 @@ jobs:
 
           # Compilar a solução PJSIP
           Write-Host "Compilando solução PJSIP..."
-          $pjSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/build/vs/pjproject-vs14.sln"
+          # Ajuste o caminho da solução PJSIP. Usando o caminho especificado pelo utilizador.
+          $pjSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjproject-vs14.sln" # <-- Caminho ajustado para a raiz do pjproject
           # O script 'build_pjsip.ps1' já contém o try-catch para o MSBuild e lida com o exit code.
           scripts/build_pjsip.ps1 -SlnFile $pjSlnPath
           # O resultado do build_pjsip.ps1 é que determinará o $LASTEXITCODE para esta etapa.
