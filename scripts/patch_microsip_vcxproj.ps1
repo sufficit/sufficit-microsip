@@ -17,6 +17,8 @@
 #     Isto deve resolver o aviso "Could not find Linker node".
 #   - Ajustados os caminhos de include para serem consistentes e garantir que os cabeçalhos PJSIP
 #     são sempre encontrados corretamente pelo compilador do MicroSIP.
+#   - FIXED: Corrigido `ParserError` na definição do atributo "Condition" para ItemDefinitionGroup.
+#     A string agora é tratada como literal usando aspas simples.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -60,7 +62,8 @@ try {
         Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
         $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
         $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
-        $itemDefinitionGroupNode.SetAttribute("Condition", "'$(Configuration)|$(Platform)'=='Release|x64'")
+        # Corrigido: Usar aspas simples para tratar a string como literal, evitando parsing do PowerShell
+        $itemDefinitionGroupNode.SetAttribute("Condition", '$(Configuration)|$(Platform)'=='Release|x64'')
         $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 

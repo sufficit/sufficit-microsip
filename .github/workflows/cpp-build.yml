@@ -45,9 +45,11 @@
 #     Para resolver, removemos o patching redundante do `pjmedia_codec.vcxproj` (Step 4)
 #     e vamos focar todo o patching de includes e libs no `microsip.vcxproj` (Step 5)
 #     para garantir que todos os caminhos PJSIP são adicionados corretamente.
+#   - Corrigido o problema de parâmetros vazios para `patch_microsip_vcxproj.ps1` na Step 5.
+#     Agora os caminhos são passados como literais strings construídas a partir de `$env:GITHUB_WORKSPACE`.
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
-#     `401 Unauthorized` errors for cross-repository access.
+#     `401 Unauthorized` errors for cross-repository or private repository access.
 #   - Added `contents: read` permission to the job to allow downloading Opus artifacts
 #     from another repository, resolving the 401 Unauthorized error.
 #   - Changed 'config_site.h' and 'pjsip_extra_defines.h' generation to direct file copying
@@ -79,9 +81,6 @@ jobs:
       contents: read # Concede permissão de leitura para o GITHUB_TOKEN
     env: # Definir variáveis de ambiente para o job aqui
       GH_PAT: ${{ secrets.GH_PAT }} # Define GH_PAT a partir dos segredos do repositório
-      PJSIP_ROOT_RELATIVE: "external/pjproject" # Caminho relativo à raiz do MicroSIP para a raiz do PJSIP
-      PJSIP_LIB_PATH_RELATIVE: "external/pjproject/lib" # Caminho relativo à raiz do MicroSIP para as libs PJSIP
-      PJSIP_APPS_INCLUDE_PATH_RELATIVE: "external/pjproject/pjsip/include" # Caminho para pjsua.h
 
     steps:
       # Step 1: Checkout do repositório MicroSIP
@@ -199,21 +198,25 @@ jobs:
         shell: pwsh
         run: |
           $microsipVcxprojPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "microsip.vcxproj"
-          # As variáveis de caminho são acessíveis a partir do ambiente do job (definidas no nível 'env').
+          
+          # Definir caminhos absolutos como literais para passar para o script de patch
+          # Isso contorna a inconsistência de passagem de variáveis de ambiente com parâmetros nomeados
+          $pjsipRoot = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject"
+          $pjsipLib = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
+          $pjsipAppsInclude = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjsip/include"
 
           Write-Host "Aplicando patch ao microsip.vcxproj em: $microsipVcxprojPath"
-          Write-Host "PJSIP Root: $env:PJSIP_ROOT_RELATIVE"
-          Write-Host "PJSIP Lib Path: $env:PJSIP_LIB_ROOT_RELATIVE"
-          Write-Host "PJSIP Apps Include Path: $env:PJSIP_APPS_INCLUDE_PATH_RELATIVE"
+          Write-Host "PJSIP Root: $pjsipRoot"
+          Write-Host "PJSIP Lib Path: $pjsipLib"
+          Write-Host "PJSIP Apps Include Path: $pjsipAppsInclude"
 
           # Chamar o script de patch com todos os parâmetros necessários
-          # O script patch_microsip_vcxproj.ps1 está na raiz do repositório principal (sufficit-microsip)
-          # Ele será executado no diretório raiz do MicroSIP, então os caminhos passados são diretos.
+          # Passando os caminhos como literais absolutos para garantir a sua interpretação correta.
           & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
             -ProjFile $microsipVcxprojPath `
-            -PjsipIncludeRoot $env:PJSIP_ROOT_RELATIVE ` # PJSIP_ROOT_RELATIVE é a raiz dos includes PJSIP
-            -PjsipLibRoot $env:PJSIP_LIB_ROOT_RELATIVE ` # PJSIP_LIB_ROOT_RELATIVE é o diretório de libs PJSIP
-            -PjsipAppsIncludePath $env:PJSIP_APPS_INCLUDE_PATH_RELATIVE # PJSIP_APPS_INCLUDE_PATH_RELATIVE é o diretório de includes específicos das apps PJSIP
+            -PjsipIncludeRoot "$pjsipRoot" `
+            -PjsipLibRoot "$pjsipLib" `
+            -PjsipAppsIncludePath "$pjsipAppsInclude"
           # Removido: if ($LASTEXITCODE -ne 0) { exit 1 } - O script está a reportar sucesso, este erro é benigno.
 
       # Step 6: Compilar a solução MicroSIP (final)
