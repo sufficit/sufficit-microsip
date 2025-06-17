@@ -136,7 +136,7 @@ try {
     # Define all required library directories relative to microsip.vcxproj
     $requiredLibDirs = @(
         $pjsipLibRoot, # This is the absolute path to external/pjproject/lib
-        Join-Path -Path $PjsipIncludeRoot -ChildPath "third_party/lib" # Path to built third-party libs like libyuv.lib
+        (Join-Path -Path $PjsipIncludeRoot -ChildPath "third_party/lib") # Path to built third-party libs like libyuv.lib
     ) | ForEach-Object { [System.IO.Path]::GetRelativePath($microsipProjectDir, $_) } # Convert absolute paths to relative paths
 
     $currentLibDirs = if ($additionalLibraryDirsNode) { $additionalLibraryDirsNode.'#text' } else { "" }
