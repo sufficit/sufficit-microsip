@@ -77,6 +77,8 @@ This script has been the source of the most challenging debugging due to interac
 3.  **Workflow (`cpp-build.yml`):**
     * The workflow orchestrates the steps: checking out code, preparing build dates, setting up MSBuild, preparing/compiling PJSIP, patching MicroSIP's `.vcxproj`, compiling MicroSIP, and uploading artifacts.
     * **Debug Step (`List PJSIP Lib Directory Contents`):** A diagnostic step has been added before the final MicroSIP compilation to list the contents of the `external/pjproject/lib` directory. This is crucial for verifying that the compiled and renamed PJSIP `.lib` files are indeed present and correctly named if linker errors persist.
+    * **Action Version:** * `1.0.58`
+        * **Last Updated:** `2025-06-17 05:30:00 PM -03` (Updated for GH_PAT and PJSIP lib path)
 
 4.  **Future Expansion:**
     * Placeholder jobs for `build-linux` and `build-linux-arm` are included but commented out. These can be enabled and configured once the Windows build is fully stable and requirements for other platforms are defined.
