@@ -152,7 +152,7 @@ jobs:
           # Note: Opus is already renamed by download_opus_windows.ps1, so not here.
           $libRenames = @{
               "pjlib-x86_64-x64-vc14-Release.lib" = "pjlib.lib";
-              "pjlib-util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib"; # CORRECTION APPLIED HERE
+              "pjlib-util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib";
               "pjnath-x86_64-x64-vc14-Release.lib" = "pjnath.lib";
               "pjmedia-x86_64-x64-vc14-Release.lib" = "pjmedia.lib";
               "pjmedia-audiodev-x86_64-x64-vc14-Release.lib" = "pjmedia-audiodev.lib";
@@ -184,13 +184,18 @@ jobs:
                   exit 1
               }
               
-              # Rename and move the output .lib file to a central 'lib' directory
+              # Determine the specific output directory for this .vcxproj
+              # This assumes the output .lib is in a 'lib' directory relative to the .vcxproj parent
+              # This pattern is common in PJSIP's build structure.
+              $projectBaseDir = Split-Path -Path $projectFile -Parent # e.g., "pjlib/build"
+              $outputLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectBaseDir/lib"
+              
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
               
-              # Search for the newly compiled library file within the entire external/pjproject directory
-              # This is robust against variations in MSBuild's exact output path.
-              $foundLibFile = Get-ChildItem -Path $env:GITHUB_WORKSPACE\external\pjproject -Filter $originalLibNameWithSuffix -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+              # Look for the compiled library directly in its expected output location
+              $sourceLibPath = Join-Path -Path $outputLibDir -ChildPath $originalLibNameWithSuffix
+              $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue # CORRECTION APPLIED HERE
           
               # Define the central PJSIP lib directory where all renamed libraries should reside
               $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
@@ -205,7 +210,7 @@ jobs:
                       Write-Host "Found '$($originalLibNameWithSuffix)' at '$($foundLibFile.FullName)'. Renaming to '$($targetLibName)' and moving to '$($centralPjsipLibDir)'."
                       Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
                   } else {
-                      Write-Host "##[error]Error: Original library file '$($originalLibNameWithSuffix)' not found after compilation! Check PJSIP build logs. Failing workflow."
+                      Write-Host "##[error]Error: Original library file '$($originalLibNameWithSuffix)' not found after compilation! Expected at '$($sourceLibPath)'. Check PJSIP build logs. Failing workflow." # ADDED MORE INFO FOR DEBUGGING
                       exit 1 # Fail the workflow if a critical library is not found for renaming
                   }
               } else {
