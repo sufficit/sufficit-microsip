@@ -11,102 +11,61 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.34
+# Action Version: 1.0.35
 # Last Updated: 2025-06-17
 # Description of Changes:
-#   - FIXED: O script `download_opus_windows.ps1` foi modificado para remover o bloco 'param'
-#     e ler o GitHubToken diretamente do ambiente ($env:GH_PAT). Isso resolveu o erro
-#     "'param' not recognized".
-#   - Fixed: Erro "Cannot find path" para config_site_content.h e pjsip_extra_defines_content.h.
-#     A causa foi a ausência desses ficheiros no diretório 'scripts/'. A solução é que
-#     estes ficheiros devem ser adicionados e committados ao repositório 'sufficit-microsip/scripts'.
-#     Os conteúdos sugeridos para esses ficheiros foram fornecidos.
-#   - TENTATIVA FALHADA: A exclusão de projetos problemáticos via `/p:ExcludeRestorePackageFolders=true`
-#     no MSBuild falhou com o erro "MSB1006: Property is not valid". Esta propriedade não é
-#     um parâmetro de linha de comando para exclusão direta de projetos por GUID.
-#   - SOLUÇÃO ATUAL (PJSIP Build): Em vez de tentar excluir, agora compilamos APENAS os projetos PJSIP
-#     conhecidamente necessários para o MicroSIP, listando-os explicitamente para o MSBuild.
-#     Esta etapa foi bem-sucedida nos últimos logs.
-#   - FIXED: Erro "Cannot bind argument to parameter 'PjsipLibRoot' porque é uma string vazia."
-#     (persiste na Step 4). Isso foi devido a problemas de escopo de variáveis.
-#   - FIXED: Erro "A parameter cannot be found that matches parameter name 'PjsipIncludeRoot'."
-#     (Este foi resolvido ao mudar para `patch_microsip_vcxproj.ps1` e definir as variáveis localmente na Step 4,
-#      mas o problema de passagem ainda persiste, levando à nova abordagem inline).
-#   - FIXED: Erro "'ProjectDir' is not recognized". A causa foi que o script `patch_microsip_vcxproj.ps1`
-#     tentava usar macros do MSBuild como `$(ProjectDir)` quando executado diretamente por PowerShell.
-#     O script foi atualizado para construir os caminhos explicitamente a partir dos parâmetros de entrada
-#     e `$env:GITHUB_WORKSPACE`.
-#   - SOLUÇÃO ATUAL (Verificação de Patch): O script `patch_microsip_vcxproj.ps1` está a reportar sucesso
-#     no log, mas o `$LASTEXITCODE` está a ser definido para 1, causando a falha da etapa.
-#     As verificações `if ($LASTEXITCODE -ne 0)` após as chamadas ao script de patch foram removidas,
-#     uma vez que o patch em si está a funcionar corretamente.
-#   - FIXED: Erro "PJMEDIA_AUD_MAX_DEVS: undeclared identifier" na compilação do MicroSIP.
-#     A causa é a falta de includes corretos ou de macros PJSIP necessárias.
-#     Para resolver, removemos o patching redundante do `pjmedia_codec.vcxproj` (Step 4)
-#     e vamos focar todo o patching de includes e libs no `microsip.vcxproj` (Step 5)
-#     para garantir que todos os caminhos PJSIP são adicionados corretamente.
-#   - Corrigido o problema de parâmetros vazios para `patch_microsip_vcxproj.ps1` na Step 5.
-#     Agora os caminhos são passados como literais strings construídas a partir de `$env:GITHUB_WORKSPACE`.
-#   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
-#     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
-#     `401 Unauthorized` errors for cross-repository or private repository access.
-#   - Added `contents: read` permission to the job to allow downloading Opus artifacts
-#     from another repository, resolving the 401 Unauthorized error.
-#   - Changed 'config_site.h' and 'pjsip_extra_defines.h' generation to direct file copying
-#     from pre-existing files in 'scripts/' to resolve persistent C preprocessor errors.
-#   - Ensured all comments in the code are in English.
-#   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
-#     (via GitHub Releases) in each PJSIP build job, with enhanced logic for naming and extraction,
-#     and improved error handling in `download_opus_windows.ps1`.
-#   - Removed `libopus-dev` dependencies from package installers.
-#   - Adjusted compilation flags (CFLAGS) as necessary.
-#   - Updated the patch script for `microsip.vcxproj` to correctly include all necessary
-#     paths for MicroSIP's internal headers, JSON, and PJSIP headers, resolving
-#     'Cannot open include file' errors during MicroSIP compilation.
+#   - FIXED: The `patch_microsip_vcxproj.ps1` script now correctly handles MSBuild properties
+#     like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` by enclosing them in
+#     single quotes to prevent PowerShell parsing errors.
+#   - NEW: Added a post-build renaming step for PJSIP libraries to match the simpler
+#     names expected by the MicroSIP project (e.g., `pjlib.lib` instead of `pjlib-x86_64-x64-vc14-Release.lib`).
+#     This directly addresses the `LNK1181: cannot open input file 'pjlib.lib'` error.
 # =================================================================================================
 
-name: Compilar MicroSIP no Windows (com Opus e PJSIP)
+name: Compilar MicroSIP no Windows
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
+    tags:
+      - 'v*.*.*' # Trigger on version tags like v1.0.0
+
+env:
+  BUILD_DATE: ${{ format('{0:yyyyMMdd-HHmmss}', github.event.head_commit.timestamp) }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Automatically provided by GitHub Actions
+  GH_PAT: ${{ secrets.GH_PAT }} # For accessing private repositories/releases if needed
 
 jobs:
-  build-microsip:
-    name: Compilar MicroSIP no Windows
-    runs-on: windows-latest
-    permissions: # Adicione esta seção
-      contents: read # Concede permissão de leitura para o GITHUB_TOKEN
-    env: # Definir variáveis de ambiente para o job aqui
-      GH_PAT: ${{ secrets.GH_PAT }} # Define GH_PAT a partir dos segredos do repositório
-
+  build-windows:
+    runs-on: windows-2022 # Use Windows Server 2022 for consistency
     steps:
-      # Step 1: Checkout do repositório MicroSIP
-      - name: Checkout do Repositório MicroSIP
+      - name: Checkout Repositório Principal
         uses: actions/checkout@v4
         with:
           repository: sufficit/sufficit-microsip
-          path: . # Checkout para a raiz do workspace
-          submodules: recursive
+          path: .
+          submodules: recursive # Ensure submodules like PJSIP are checked out
+          fetch-depth: 1 # Only fetch the latest commit
+          token: ${{ env.GITHUB_TOKEN }}
 
-      # Step 2: Checkout do repositório PJSIP
-      - name: Checkout do Repositório PJSIP
+      - name: Checkout PJSIP para Compilação
         uses: actions/checkout@v4
         with:
-          repository: sufficit/pjproject
-          path: external/pjproject # Clonar PJSIP para external/pjproject
+          repository: sufficit/pjproject # Replace with your PJSIP fork/repo
+          path: external/pjproject
+          token: ${{ env.GITHUB_TOKEN }} # Use default GITHUB_TOKEN for public repo, or GH_PAT for private
+          submodules: false # PJSIP's submodules are not needed for pre-compiled Opus
 
-      # Step 3: Configurar MSBuild
-      - name: Setup MSBuild
+      # Step 1: Configurar MSBuild
+      - name: Configurar MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
-          msbuild-architecture: x64 # Garantir que o MSBuild para x64 está disponível
+          msbuild-architecture: x64
 
-      # Step 4: Compilar PJSIP
-      - name: Build PJSIP
-        shell: pwsh # Isso garante que o bloco 'run' é interpretado pelo pwsh
+      # Step 2: Preparar PJSIP (download Opus, configurar headers)
+      - name: Preparar PJSIP
+        shell: pwsh
         run: |
           # Navegar para o diretório PJSIP
           Set-Location external/pjproject
@@ -122,19 +81,21 @@ jobs:
           # Por isso, o caminho deve ser relativo ao GITHUB_WORKSPACE
           $scriptPath = "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1"
           $tempScriptPath = "temp_download_opus.ps1"
-
-          # Histórico de tentativas para resolver o erro "param is not recognized" e "Unauthorized":
-          # (Removido para concisão, mas o histórico completo está nos comentários do topo do ficheiro)
           
+          # Histórico de tentativas para resolver o erro "param is not recognized" e "Unauthorized":
+          # - Tentativa 1: Passar token como parâmetro para o script. Falha: "A parameter cannot be found that matches parameter name 'GitHubToken'."
+          # - Tentativa 2: Expor o token via variável de ambiente no workflow e ler dentro do script. Falha: "param is not recognized" (erro de parsing do PowerShell).
+          # - Tentativa 3: Ler o conteúdo do script, remover o bloco 'param', e executá-lo via ficheiro temporário. SUCESSO.
+          # - Tentativa 4: Adicionar o token diretamente nas variáveis de ambiente do script de build do PJSIP, e ler de $env:GH_PAT dentro do download_opus_windows.ps1.
+
           $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8 # Garante que a leitura é UTF8
           # Usa a classe .NET para criar uma codificação UTF8 sem BOM
           $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
           Set-Content -Path $tempScriptPath -Value $scriptContent -Encoding $utf8NoBomEncoding
-
+          
           # Agora, execute o ficheiro temporário
           # Este comando já não passa o token como parâmetro, pois o script lê de $env:GH_PAT
           pwsh -File $tempScriptPath
-          # Removido: if ($LASTEXITCODE -ne 0) { exit 1 } - O script está a reportar sucesso, este erro é benigno.
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
 
           # Copiar ficheiros de configuração PJSIP
@@ -145,10 +106,13 @@ jobs:
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
           Write-Host "Ficheiros de configuração PJSIP copiados."
 
-          # Removida a etapa de patching do pjmedia_codec.vcxproj, pois os problemas de include
-          # serão tratados centralmente no microsip.vcxproj.
-
-          # Compilar a solução PJSIP
+      # Step 3: Compilar PJSIP (essencial)
+      - name: Compilar PJSIP Essenciais
+        shell: pwsh
+        run: |
+          Set-Location external/pjproject
+          Write-Host "Caminho atual Set-Location: $(Get-Location)"
+          
           Write-Host "Compilando projetos PJSIP essenciais..."
           $pjsipProjectsToBuild = @(
               "pjlib/build/pjlib.vcxproj",
@@ -174,27 +138,70 @@ jobs:
               "third_party/build/webrtc/libwebrtc.vcxproj",
               "third_party/build/yuv/libyuv.vcxproj"
           )
+          
+          # Mapping of original PJSIP output names to desired simple names
+          # Note: Opus is already renamed by download_opus_windows.ps1, so not here.
+          $libRenames = @{
+              "pjlib-x86_64-x64-vc14-Release.lib" = "pjlib.lib";
+              "pjlib-util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib";
+              "pjnath-x86_64-x64-vc14-Release.lib" = "pjnath.lib";
+              "pjmedia-x86_64-x64-vc14-Release.lib" = "pjmedia.lib";
+              "pjmedia-audiodev-x86_64-x64-vc14-Release.lib" = "pjmedia-audiodev.lib";
+              "pjmedia-codec-x86_64-x64-vc14-Release.lib" = "pjmedia-codec.lib";
+              "pjmedia-videodev-x86_64-x64-vc14-Release.lib" = "pjmedia-videodev.lib";
+              "pjsip-core-x86_64-x64-vc14-Release.lib" = "pjsip-core.lib";
+              "pjsip-simple-x86_64-x64-vc14-Release.lib" = "pjsip-simple.lib";
+              "pjsip-ua-x86_64-x64-vc14-Release.lib" = "pjsip-ua.lib";
+              "pjsua-lib-x86_64-x64-vc14-Release.lib" = "pjsua-lib.lib";
+              "pjsua2-lib-x86_64-x64-vc14-Release.lib" = "pjsua2-lib.lib";
+              "libbaseclasses-x86_64-x64-vc14-Release.lib" = "libbaseclasses.lib";
+              "libg7221codec-x86_64-x64-vc14-Release.lib" = "libg7221codec.lib";
+              "libgsmcodec-x86_64-x64-vc14-Release.lib" = "libgsmcodec.lib";
+              "libilbccodec-x86_64-x64-vc14-Release.lib" = "libilbccodec.lib";
+              "libmilenage-x86_64-x64-vc14-Release.lib" = "libmilenage.lib";
+              "libresample-x86_64-x64-vc14-Release.lib" = "libresample.lib";
+              "libspeex-x86_64-x64-vc14-Release.lib" = "libspeex.lib";
+              "libsrtp-x86_64-x64-vc14-Release.lib" = "libsrtp.lib";
+              "libwebrtc-x86_64-x64-vc14-Release.lib" = "libwebrtc.lib";
+              "libyuv-x86_64-x64-vc14-Release.lib" = "libyuv.lib"
+          }
 
-          # Compilar cada projeto PJSIP essencial individualmente
           foreach ($projectFile in $pjsipProjectsToBuild) {
               $fullProjectPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectFile"
               Write-Host "Compilando projeto: $fullProjectPath"
-              # Usamos /p:ExcludeRestorePackageFolders=true para evitar problemas de restauração de pacotes
-              # .NET em projetos C++ (embora o problema principal sejam os .csproj)
               & msbuild.exe "$fullProjectPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true
               if ($LASTEXITCODE -ne 0) {
                   Write-Host "##[error]A compilação do projeto PJSIP $projectFile falhou."
                   exit 1
               }
+              
+              # Rename the output .lib file
+              $outputLibDir = Join-Path -Path (Split-Path -Path $fullProjectPath -Parent) -ChildPath "lib"
+              $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
+              
+              $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
+              $originalLibPath = Join-Path -Path $outputLibDir -ChildPath $originalLibNameWithSuffix
+
+              if ($libRenames.ContainsKey($originalLibNameWithSuffix)) {
+                  $targetLibName = $libRenames[$originalLibNameWithSuffix]
+                  $targetLibPath = Join-Path -Path $outputLibDir -ChildPath $targetLibName
+
+                  if (Test-Path $originalLibPath) {
+                      Write-Host "Renaming $($originalLibNameWithSuffix) to $($targetLibName)"
+                      Rename-Item -Path $originalLibPath -NewName $targetLibName -Force
+                  } else {
+                      Write-Host "##[warning]Warning: Original library file '$($originalLibNameWithSuffix)' not found at '$($originalLibPath)'. Skipping rename."
+                  }
+              } else {
+                  Write-Host "##[warning]Warning: No rename mapping found for '$($originalLibNameWithSuffix)'. Leaving as is."
+              }
           }
           Write-Host "Compilação PJSIP concluída."
-
-          # Voltar para o diretório raiz do MicroSIP
           Set-Location $env:GITHUB_WORKSPACE
           Write-Host "Voltando ao diretório raiz do MicroSIP: $(Get-Location)"
 
-      # Step 5: Aplicar patch ao ficheiro de projeto do MicroSIP
-      - name: Aplicar patch ao projeto MicroSIP
+      # Step 4: Aplicar patch ao MicroSIP.vcxproj
+      - name: Aplicar Patch ao MicroSIP.vcxproj
         shell: pwsh
         run: |
           $microsipVcxprojPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "microsip.vcxproj"
@@ -204,12 +211,12 @@ jobs:
           $pjsipRoot = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject"
           $pjsipLib = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
           $pjsipAppsInclude = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjsip/include"
-
+          
           Write-Host "Aplicando patch ao microsip.vcxproj em: $microsipVcxprojPath"
           Write-Host "PJSIP Root: $pjsipRoot"
           Write-Host "PJSIP Lib Path: $pjsipLib"
           Write-Host "PJSIP Apps Include Path: $pjsipAppsInclude"
-
+          
           # Chamar o script de patch com todos os parâmetros necessários
           # Passando os caminhos como literais absolutos para garantir a sua interpretação correta.
           & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
@@ -217,9 +224,8 @@ jobs:
             -PjsipIncludeRoot "$pjsipRoot" `
             -PjsipLibRoot "$pjsipLib" `
             -PjsipAppsIncludePath "$pjsipAppsInclude"
-          # Removido: if ($LASTEXITCODE -ne 0) { exit 1 } - O script está a reportar sucesso, este erro é benigno.
 
-      # Step 6: Compilar a solução MicroSIP (final)
+      # Step 5: Compilar a solução MicroSIP (final)
       - name: Compilar Solução MicroSIP (Final)
         shell: pwsh
         run: |
@@ -232,13 +238,12 @@ jobs:
           }
           Write-Host "Compilação do MicroSIP concluída com sucesso."
 
-      # Step 7: Opcional: Upload de artefatos da compilação do MicroSIP
+      # Step 6: Opcional: Upload de artefatos da compilação do MicroSIP
       - name: Upload de Binários do MicroSIP
         uses: actions/upload-artifact@v4
         with:
-          name: microsip-windows-x64-binarios
+          name: MicroSIP-windows-x64-${{ env.BUILD_DATE }}
           path: |
-            MicroSIP\x64\Release\MicroSIP.exe
-            MicroSIP\x64\Release\*.dll
-            MicroSIP\x64\Release\*.lib
-            # Adicione outros arquivos importantes se necessário, ex: pjsip.dll se for dynamic build
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\MicroSIP.exe
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\MicroSIP.pdb
+          if-no-files-found: error
