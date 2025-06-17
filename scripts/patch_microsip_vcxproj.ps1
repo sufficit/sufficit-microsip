@@ -20,8 +20,10 @@
 #   - FIXED: Added `external/pjproject/third_party/lib` to `AdditionalLibraryDirectories`
 #     to resolve `LNK1181: cannot open input file 'libyuv.lib'` error (this logic is now part of the appending below).
 #   - FIXED: Removed trailing comma in `$requiredLibDirs` and other arrays to resolve "Missing expression after ','" ParserError.
-#   - NEW: Explicitly APPENDEs required library directories and dependencies to existing ones,
-#     instead of replacing the entire node content. This preserves existing necessary paths/libs.
+#   - NEW: Modified appending strategy for `AdditionalLibraryDirectories` and `AdditionalDependencies`
+#     to prioritize our custom paths and explicitly include common MSBuild default placeholders
+#     like `$(LibraryPath)` and `$(CoreLibraryDependencies)`. This should ensure all necessary
+#     paths are present and in a compatible order for the linker.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -90,52 +92,54 @@ try {
     # 2. Third-party libraries specifically for MicroSIP (e.g., jsoncpp)
     # 3. All PJSIP core include directories (relativos ao ProjectDir, usando os parâmetros)
     $requiredIncludes = @(
-        ".\" # Para cabeçalhos na raiz do projeto MicroSIP (onde microsip.vcxproj está)
-        ".\lib" # Para cabeçalhos em MicroSIP's lib folder
-        ".\lib\jsoncpp" # Para json.h
-        "$pjsipIncludePathForVcxproj\pjlib\include" # Usar barra invertida para consistência no Windows
-        "$pjsipIncludePathForVcxproj\pjlib-util\include"
-        "$pjsipIncludePathForVcxproj\pjnath\include"
-        "$pjsipIncludePathForVcxproj\pjmedia\include"
-        "$pjsipAppsIncludePathForVcxproj" # Já aponta para external/pjproject/pjsip/include
+        ".\", # Para cabeçalhos na raiz do projeto MicroSIP (onde microsip.vcxproj está)
+        ".\lib", # Para cabeçalhos em MicroSIP's lib folder
+        ".\lib\jsoncpp", # Para json.h
+        "$pjsipIncludePathForVcxproj\pjlib\include", # Usar barra invertida para consistência no Windows
+        "$pjsipIncludePathForVcxproj\pjlib-util\include",
+        "$pjsipIncludePathForVcxproj\pjnath\include",
+        "$pjsipIncludePathForVcxproj\pjmedia\include",
+        "$pjsipAppsIncludePathForVcxproj", # Já aponta para external/pjproject/pjsip/include
         # Adicionar include para Opus, que é copiado para pjlib/include/pj/opus
         "$pjsipIncludePathForVcxproj\pjlib\include\pj\opus"
     )
 
     $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
 
-    # Use a more robust appending method for Includes
+    # Use a more robust appending method for Includes, prioritizing our paths
     if (-not $additionalIncludeDirsNode) {
         $additionalIncludeDirsNode = $projXml.CreateElement("AdditionalIncludeDirectories", $nsManager.LookupNamespace("msbuild"))
         $clCompileNode.AppendChild($additionalIncludeDirsNode)
         $additionalIncludeDirsNode.'#text' = ($requiredIncludes -join ';') + ";%(AdditionalIncludeDirectories)"
         Write-Host "Added AdditionalIncludeDirectories node with all necessary paths in $ProjFile."
     } else {
+        # Combine existing and required paths, ensuring uniqueness, then append original placeholder
         $currentIncludes = $additionalIncludeDirsNode.'#text'.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
         $finalIncludes = ($requiredIncludes + $currentIncludes) | Select-Object -Unique
         $additionalIncludeDirsNode.'#text' = ($finalIncludes -join ';') + ";%(AdditionalIncludeDirectories)"
         Write-Host "Updated AdditionalIncludeDirectories in $ProjFile to include all necessary paths."
     }
 
-    # Processar Library Directories e Dependencies
+    # Processar Library Directories
     $additionalLibraryDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
     
-    # Define all required library directories relative to microsip.vcxproj
+    # Define all required custom library directories relative to microsip.vcxproj
     $requiredLibDirs = @(
-        $pjsipLibPathForVcxproj, # This is the absolute path to external/pjproject/lib, converted to relative
-        (Join-Path -Path $PjsipIncludeRoot -ChildPath "third_party/lib") | ForEach-Object { [System.IO.Path]::GetRelativePath($microsipProjectDir, $_) } # Path to built third-party libs like libyuv.lib, converted to relative
+        $pjsipLibPathForVcxproj, # Path to external/pjproject/lib (relative to microsip.vcxproj)
+        (Join-Path -Path $PjsipIncludeRoot -ChildPath "third_party/lib") | ForEach-Object { [System.IO.Path]::GetRelativePath($microsipProjectDir, $_) } # Path to built third-party libs like libyuv.lib (relative to microsip.vcxproj)
     )
 
-    # Use a more robust appending method for Library Directories
+    # Use a more robust appending method for Library Directories, prioritizing our paths and standard placeholders
     if (-not $additionalLibraryDirsNode) {
         $additionalLibraryDirsNode = $projXml.CreateElement("AdditionalLibraryDirectories", $nsManager.LookupNamespace("msbuild"))
         $linkerNode.AppendChild($additionalLibraryDirsNode)
-        $additionalLibraryDirsNode.'#text' = ($requiredLibDirs -join ';') + ";%(AdditionalLibraryDirectories)"
+        $additionalLibraryDirsNode.'#text' = ($requiredLibDirs -join ';') + ";$(LibraryPath);%(AdditionalLibraryDirectories)"
         Write-Host "Added AdditionalLibraryDirectories node with all necessary library paths in $ProjFile."
     } else {
+        # Combine existing and required paths, ensuring uniqueness, then append standard placeholders
         $currentLibDirs = $additionalLibraryDirsNode.'#text'.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
         $finalLibDirs = ($requiredLibDirs + $currentLibDirs) | Select-Object -Unique
-        $additionalLibraryDirsNode.'#text' = ($finalLibDirs -join ';') + ";%(AdditionalLibraryDirectories)"
+        $additionalLibraryDirsNode.'#text' = ($finalLibDirs -join ';') + ";$(LibraryPath);%(AdditionalLibraryDirectories)"
         Write-Host "Updated AdditionalLibraryDirectories in $ProjFile to include all necessary library paths."
     }
 
@@ -163,8 +167,10 @@ try {
         "libsrtp.lib",
         "libwebrtc.lib",
         "libyuv.lib",
-        "libopus.lib", # From our opus download
-        # Common Windows libs that PJSIP might need for linking
+        "libopus.lib" # From our opus download
+    )
+    # Common Windows libs that PJSIP might need for linking (these are usually implicitly found via $(CoreLibraryDependencies) or LibraryPath)
+    $windowsCommonLibs = @(
         "ws2_32.lib",
         "advapi32.lib",
         "iphlpapi.lib",
@@ -175,24 +181,22 @@ try {
         "gdi32.lib",
         "crypt32.lib",
         "dnsapi.lib"
-        # Adicione quaisquer outras bibliotecas específicas que o seu MicroSIP precise para ligar
     )
-    # Juntar os nomes das libs com ponto e vírgula
-    $pjsipLibsString = $pjsipLibs -join ';'
 
     $additionalDependenciesNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalDependencies", $nsManager)
 
-    # Use a more robust appending method for Dependencies
+    # Use a more robust appending method for Dependencies, combining our libs and standard placeholders
     if (-not $additionalDependenciesNode) {
         $additionalDependenciesNode = $projXml.CreateElement("AdditionalDependencies", $nsManager.LookupNamespace("msbuild"))
         $linkerNode.AppendChild($additionalDependenciesNode)
-        $additionalDependenciesNode.'#text' = ($pjsipLibs -join ';') + ";%(AdditionalDependencies)"
-        Write-Host "Added AdditionalDependencies node with all necessary PJSIP libraries."
+        $additionalDependenciesNode.'#text' = ($pjsipLibs + $windowsCommonLibs -join ';') + ";%(AdditionalDependencies)"
+        Write-Host "Added AdditionalDependencies node with all necessary PJSIP and common Windows libraries."
     } else {
+        # Combine existing, custom, and common Windows libraries, ensuring uniqueness, then append original placeholder
         $currentDependencies = $additionalDependenciesNode.'#text'.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
-        $finalDependencies = ($pjsipLibs + $currentDependencies) | Select-Object -Unique
+        $finalDependencies = ($pjsipLibs + $windowsCommonLibs + $currentDependencies) | Select-Object -Unique
         $additionalDependenciesNode.'#text' = ($finalDependencies -join ';') + ";%(AdditionalDependencies)"
-        Write-Host "Updated AdditionalDependencies in $ProjFile to include all necessary PJSIP libraries."
+        Write-Host "Updated AdditionalDependencies in $ProjFile to include all necessary PJSIP and common Windows libraries."
     }
 
     $projXml.Save($ProjFile)
