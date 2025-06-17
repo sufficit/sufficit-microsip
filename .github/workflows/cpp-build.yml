@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.57
-# Last Updated: 2025-06-17 06:04:37 PM -03
+# Action Version: 1.0.58
+# Last Updated: 2025-06-17 05:30:00 PM -03 (Updated for GH_PAT and PJSIP lib path)
 # =================================================================================================
 
 name: C++ Build
@@ -28,7 +28,7 @@ on:
 env:
   # Define the GH_PAT variable for PowerShell script authentication
   # This variable must be configured as a secret in the repository.
-  GH_PAT: ${{ secrets.GH_PAT }}_
+  GH_PAT: ${{ secrets.GH_PAT }} # FIXED: Removed trailing underscore
 
 jobs:
   build-windows:
@@ -198,15 +198,11 @@ jobs:
               Write-Host "DEBUG: libNameWithoutSuffix = $libNameWithoutSuffix"
               Write-Host "DEBUG: originalLibNameWithSuffix = $originalLibNameWithSuffix"
 
-              # Corrected path construction for the actual intermediate output directory used by MSBuild
-              # It's usually 'output\<ProjectName>-<Architecture>-<Configuration>'
-              $expectedIntermediateLibDir = Join-Path -Path $projectBuildDir -ChildPath "output\$libNameWithoutSuffix-x86_64-x64-vc14-Release"
-              
-              # Construct the full path to the freshly compiled .lib file in the intermediate output directory
-              $tempSourceLibPath = Join-Path -Path $expectedIntermediateLibDir -ChildPath $originalLibNameWithSuffix
-              
-              Write-Host "Contents of project output path '$expectedIntermediateLibDir':"
-              Get-ChildItem -Path $expectedIntermediateLibDir -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
+              # Corrected path construction: MSBuild outputs to ..\lib\ relative to the .vcxproj
+              $tempSourceLibPath = Join-Path -Path $projectBuildDir -ChildPath "..\lib\$originalLibNameWithSuffix" # FIXED: Corrected path to output .lib
+
+              Write-Host "Contents of project output path for '$originalLibNameWithSuffix':"
+              Get-ChildItem -Path (Split-Path -Path $tempSourceLibPath -Parent) -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
               Write-Host "--------------------------------------------------------"
 
               $sourceLibPath = $null
