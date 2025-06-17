@@ -11,11 +11,11 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.38
+# Action Version: 1.0.39
 # Last Updated: 2025-06-17
 # Description of Changes:
-#   - FIXED: Implemented a robust timestamp formatting using string slicing for `BUILD_DATE`,
-#     bypassing problematic `format` and `fromiso8601` function behavior, resolving "Null" type error.
+#   - FIXED: Corrected the format string for `BUILD_DATE` using `format-datetime` filter,
+#     resolving the "Unexpected symbol: '0-3'" error.
 #   - FIXED: The `patch_microsip_vcxproj.ps1` script now correctly handles MSBuild properties
 #     like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` by enclosing them in
 #     single quotes to prevent PowerShell parsing errors.
@@ -34,9 +34,9 @@ on:
       - 'v*.*.*' # Trigger on version tags like v1.0.0
 
 env:
-  # Robust timestamp formatting using string slicing, which avoids type conversion issues.
-  # Assumes github.event.head_commit.timestamp is always in ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
-  BUILD_DATE: ${{ github.event.head_commit.timestamp[0-3] }}${{ github.event.head_commit.timestamp[5-6] }}${{ github.event.head_commit.timestamp[8-9] }}-${{ github.event.head_commit.timestamp[11-12] }}${{ github.event.head_commit.timestamp[14-15] }}${{ github.event.head_commit.timestamp[17-18] }}
+  # Robust timestamp formatting using the format-datetime filter.
+  # github.run_started_at is typically in ISO 8601 format, which format-datetime can handle.
+  BUILD_DATE: ${{ format-datetime(github.run_started_at, 'yyyyMMdd-HHmmss') }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Automatically provided by GitHub Actions
   GH_PAT: ${{ secrets.GH_PAT }} # For accessing private repositories/releases if needed
 
