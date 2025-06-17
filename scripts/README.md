@@ -6,7 +6,7 @@ This directory contains PowerShell scripts developed and refined in collaboratio
 
 ## Important Note on File Versions
 
-Please ensure that the `Version` and `Timestamp` (or `Last Updated` / `Last Modified`) comments at the top of relevant script files (e.g., `.ps1` files) and configuration header files (e.g., `.h` files like `config_site_content.h` and `pjsip_extra_defines_content.h`) are **manually updated with each and every change** made to these files. This practice is crucial for traceability and to accurately reflect the state of the build automation.
+Please ensure that the `Version` and `Timestamp` (or `Last Updated` / `Last Modified`) comments at the top of relevant script files (e.g., `.ps1` files) and configuration header files (e.g., `.h` files like `config_site_content.h` and `pjsip_extra_defines_content.h`) are **manualmente updated with each and every change** made to these files. This practice is crucial for traceability and to accurately reflect the state of the build automation.
 
 ## Core Components
 
@@ -40,13 +40,15 @@ The development of these scripts has involved addressing several persistent and 
 ### 3. `patch_microsip_vcxproj.ps1`
 This script has been the source of the most challenging debugging due to interactions between PowerShell, XML manipulation, and MSBuild variables.
 
-* **Problem 1:** Initial `LNK1181: cannot open input file` errors (e.g., `pjlib.lib`, `pjlib-util.lib`).
-* **Solution 1:**
-    * The build workflow now explicitly compiles all individual PJSIP `.vcxproj` files and then **renames** their output `.lib` files to simpler names (e.g., `pjlib-util-x86_64-x64-vc14-Release.lib` becomes `pjlib-util.lib`).
-    * All these renamed `.lib` files are **moved** to a single, centralized directory: `external/pjproject/lib`. This simplifies linker path management.
-    * The `patch_microsip_vcxproj.ps1` script is updated to explicitly set the `AdditionalLibraryDirectories` in `microsip.vcxproj` to this centralized `external/pjproject/lib` folder.
-    * The script also explicitly lists *all* required PJSIP and common Windows libraries in `AdditionalDependencies`, replacing any existing entries to gain full control.
+* **Problem 1 (Initial):** `LNK1181: cannot open input file` errors (e.g., `pjlib.lib`, `pjlib-util.lib`).
+* **Problem 1 (Persistent):** Even after applying an "await and retry" logic, many PJSIP `.lib` files were reported as "not found" by the PowerShell script, despite `msbuild` indicating successful compilation. This suggested the file might not be immediately visible or its exact output path was not consistently `..\lib\` for all projects as previously assumed.
+* **Solution 1 (Revised and Successful):**
+    * The build workflow now **extracts the exact output path of each compiled `.lib` file directly from the MSBuild output logs**. This eliminates assumptions about relative paths.
+    * After extracting the exact path, the script attempts to locate the `.lib` file at this precise location.
+    * Upon successful location, the script either **renames and moves** the file to a central `external/pjproject/lib` directory (if a specific rename mapping exists in `$libRenames`) or **moves it as-is** to this central directory (if no specific rename is needed).
+    * This robust approach ensures that all necessary PJSIP `.lib` files are correctly collected into a single, predictable location for linking by MicroSIP, regardless of their original output path variations from MSBuild.
 
+### 4. `patch_microsip_vcxproj.ps1` (Additional Fixes for MicroSIP linking)
 * **Problem 2:** PowerShell `ParserError` related to here-strings and MSBuild variables in XML attributes (e.g., "The term 'LibraryPath' is not recognized," "Missing ')' in method call," "No characters are allowed after a here-string header").
 * **Solution 2:**
     * The problematic `Condition` attribute for `ItemDefinitionGroup` is now set using an **intermediate PowerShell variable** that holds the literal here-string value. This separates the here-string's strict parsing rules from the `SetAttribute` method call.

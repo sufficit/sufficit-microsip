@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.61
-# Last Updated: 2025-06-17 06:05:00 PM -03 (Ensured all found .lib files are moved to central lib directory)
+# Action Version: 1.0.62
+# Last Updated: 2025-06-17 06:12:30 PM -03 (Ensured consistent target naming for all PJSIP libs during move)
 # =================================================================================================
 
 name: C++ Build
@@ -47,8 +47,6 @@ jobs:
           # is being explicitly checked out in a separate step below.
 
       # Step 1.5: Checkout pjproject explicitly
-      # This step ensures pjproject is always in external/pjproject,
-      # independent of whether it's a git submodule in the main repo.
       - name: Checkout pjproject (sufficit/pjproject)
         uses: actions/checkout@v4
         with:
@@ -180,7 +178,7 @@ jobs:
               # Execute MSBuild and capture output line by line (no Out-String to preserve line integrity for regex)
               # Capture raw output to parse for actual .lib path
               $rawMsbuildOutput = & msbuild.exe "$fullProjectPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true /nologo
-              Write-Host ($rawMsbuildOutput | Out-String) # Still output for debugging
+              Write-Host ($rawMsbuildOutput | Out-String)
 
               if ($LASTEXITCODE -ne 0) {
                   Write-Host "##[error]PJSIP project compilation failed for $projectFile."
@@ -254,10 +252,11 @@ jobs:
                   }
               } else {
                   # This block handles libraries that don't need explicit renaming but still need to be moved
-                  # This is where the fix is primarily applied: ensure movement even without specific rename mapping
-                  Write-Host "##[warning]Warning: No specific rename mapping found for '$($originalLibNameWithSuffix)'. Moving it as is to central lib directory."
+                  # We use the original file's name as the target name in the central directory.
+                  $targetLibName = $foundLibFile.Name # Get the original name from the found file object
+                  Write-Host "##[warning]Warning: No specific rename mapping found for '$($originalLibNameWithSuffix)'. Moving it as is to central lib directory with name '$($targetLibName)'."
                   if ($null -ne $foundLibFile) {
-                      $targetNoRenamePath = Join-Path -Path $centralPjsipLibDir -ChildPath $foundLibFile.Name # Use its original name
+                      $targetNoRenamePath = Join-Path -Path $centralPjsipLibDir -ChildPath $targetLibName # Use $targetLibName here
                       Write-Host "Moving unrenamed '$($foundLibFile.Name)' from '$($foundLibFile.FullName)' to '${targetNoRenamePath}'."
                       Move-Item -Path $foundLibFile.FullName -Destination $targetNoRenamePath -Force
                   } else {
@@ -294,7 +293,7 @@ jobs:
         run: |
           $pjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
           Write-Host "Listing contents of ${pjsipLibDir}:"
-          Get-ChildItem -Path $pjsipLibDir | Format-List FullName, Length, CreationTimeUtc, LastWriteTimeUtc
+          Get-ChildItem -Path $pjsipLibDir | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
           # Removed the explicit check for pjlib-util.lib to allow the workflow to proceed
           # if other files are found, but still fail if the overall process is broken.
           # The goal here is to ensure the list is populated, not to fail on one specific missing file.
