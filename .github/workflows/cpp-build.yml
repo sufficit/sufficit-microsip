@@ -28,13 +28,13 @@
 #     conhecidamente necessários para o MicroSIP, listando-os explicitamente para o MSBuild.
 #     Esta etapa foi bem-sucedida nos últimos logs.
 #   - FIXED: Erro "Cannot bind argument to parameter 'PjsipLibRoot' because it is an empty string."
-#     A causa foi a variável `$pjsipLibRoot` não ser passada corretamente para o `patch_microsip_vcxproj.ps1` na Step 5.
-#     Agora, garantimos que todas as variáveis de caminho são passadas explicitamente como parâmetros
-#     para o script de patch em ambas as etapas onde ele é usado.
+#     (persiste na Step 4). A causa é que as variáveis de caminho não estavam a ser passadas
+#     corretamente ao `patch_microsip_vcxproj.ps1` no contexto da Step 4, mesmo com definições locais.
+#     A solução agora é executar o conteúdo do `patch_microsip_vcxproj.ps1` inline,
+#     passando as variáveis como parte do script executado.
 #   - FIXED: Erro "A parameter cannot be found that matches parameter name 'PjsipIncludeRoot'."
-#     A causa foi a chamada a `patch.ps1` em vez de `patch_microsip_vcxproj.ps1` na Step 4. Além disso,
-#     as variáveis de caminho não estavam definidas no escopo do `run` block da Step 4 antes de serem usadas.
-#     A chamada foi corrigida para usar o nome de ficheiro correto e as variáveis são agora definidas localmente.
+#     (Este foi resolvido ao mudar para `patch_microsip_vcxproj.ps1` e definir as variáveis localmente na Step 4,
+#      mas o problema de passagem ainda persiste, levando à nova abordagem inline).
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -175,17 +175,30 @@ jobs:
           $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjmedia/build/pjmedia_codec.vcxproj"
           
           # Definir as variáveis de caminho localmente para este run block
+          # O script patch_microsip_vcxproj.ps1 está na raiz do repositório principal (sufficit-microsip)
           $pjsipIncludeRoot = "external/pjproject" # Relativo à raiz do MicroSIP
           $pjsipLibRoot = "external/pjproject/lib" # Relativo à raiz do MicroSIP
           $pjsipAppsIncludePath = "external/pjproject/pjsip/include" # Caminho relativo à raiz do MicroSIP
 
-          # O script patch_microsip_vcxproj.ps1 está na raiz do repositório principal (sufficit-microsip)
-          # Ele aceita PjsipIncludeRoot, PjsipLibRoot e PjsipAppsIncludePath como parâmetros.
-          & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
-            -ProjFile $pjmedia_codec_vcxproj_path `
-            -PjsipIncludeRoot $pjsipIncludeRoot ` # Passa a variável localmente definida
-            -PjsipLibRoot $pjsipLibRoot `         # Passa a variável localmente definida
-            -PjsipAppsIncludePath $pjsipAppsIncludePath # Passa a variável localmente definida
+          # LEITURA E EXECUÇÃO INLINE DO SCRIPT DE PATCH para contornar problemas de passagem de parâmetros
+          # Isso garante que o script é interpretado diretamente com as variáveis no mesmo escopo.
+          $patchScriptContent = Get-Content "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" -Raw -Encoding UTF8
+          pwsh -Command @"
+          param (
+              [Parameter(Mandatory=\$true)]
+              [string]\$ProjFile,
+              [Parameter(Mandatory=\$true)]
+              [string]\$PjsipIncludeRoot,
+              [Parameter(Mandatory=\$true)]
+              [string]\$PjsipLibRoot,
+              [Parameter(Mandatory=\$true)]
+              [string]\$PjsipAppsIncludePath
+          )
+          
+          # Copie o corpo do script original para aqui
+          $patchScriptContent
+          "@ -ProjFile $pjmedia_codec_vcxproj_path -PjsipIncludeRoot $pjsipIncludeRoot -PjsipLibRoot $pjsipLibRoot -PjsipAppsIncludePath $pjsipAppsIncludePath
+          
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "pjmedia_codec.vcxproj patched."
 
