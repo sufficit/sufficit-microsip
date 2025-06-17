@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.51
-# Last Updated: 2025-06-17 01:25:52 PM -03
+# Action Version: 1.0.52
+# Last Updated: 2025-06-17 01:31:28 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -178,6 +178,7 @@ jobs:
               Write-Host "Compiling project: $fullProjectPath"
               
               # Capture MSBuild output to find the exact .lib path
+              # We use /nologo to get cleaner output, essential for parsing
               $msbuildOutput = & msbuild.exe "$fullProjectPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true /nologo | Out-String
               Write-Host $msbuildOutput # Output the build log for debugging
               
@@ -188,16 +189,28 @@ jobs:
               
               # Extract the exact output .lib path from MSBuild output
               # Look for lines like "project.vcxproj -> C:\path\to\lib\project-x86_64-x64-vc14-Release.lib"
-              $originalLibFullName = ($msbuildOutput | Select-String -Pattern "(\.vcxproj -> .*?\.lib)" | ForEach-Object { 
-                  $_.Matches[0].Value -replace ".*->\s*", "" -replace "`r`n", ""
+              # More robust parsing: find the line ending with '.lib' that contains '.vcxproj ->'
+              $originalLibFullName = ($msbuildOutput | Where-Object { $_ -match "\.vcxproj -> .*?\.lib$" } | ForEach-Object {
+                  ($_ -replace ".*->\s*", "" -replace "`r`n", "").Trim()
               })
               
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
 
               $sourceLibPath = $null
+              # Ensure that we actually extracted a path and it ends with the expected library name
               if ($originalLibFullName -and $originalLibFullName.EndsWith($originalLibNameWithSuffix)) {
                   $sourceLibPath = $originalLibFullName
+              } else {
+                  # Fallback/Debug: If extraction by regex fails, try to guess the path based on component structure
+                  Write-Warning "Could not reliably extract exact lib path from MSBuild output for '$projectFile'. Attempting fallback path construction."
+                  $projectRootComponent = $projectFile.Split('/')[0]
+                  if ($projectRootComponent -eq "third_party") {
+                      $sourceLibPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/third_party/lib/$originalLibNameWithSuffix"
+                  } else {
+                      $sourceLibPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectRootComponent/lib/$originalLibNameWithSuffix"
+                  }
+                  Write-Warning "Fallback path constructed: $sourceLibPath"
               }
               
               $foundLibFile = $null
