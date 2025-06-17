@@ -185,17 +185,35 @@ jobs:
               }
               
               # Determine the specific output directory for this .vcxproj
-              # A maioria dos projetos PJSIP coloca a saída .lib um nível acima do diretório 'build'
-              # dentro de uma pasta 'lib'. Ex: pjlib/build/pjlib.vcxproj -> pjlib/lib/
-              $projectLogicalDir = (Split-Path -Path $projectFile -Parent).Replace("/build", "") # e.g., "pjlib"
-              $outputLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectLogicalDir/lib" # CORRECTION APPLIED HERE
+              # O MSBuild geralmente coloca a saída .lib na pasta 'lib' que é irmã do diretório 'build'
+              # ou diretamente dentro de 'build/lib' dependendo da configuração do projeto.
+              # Vamos extrair o diretório pai do .vcxproj (e.g., "pjlib/build") e então ir um nível acima
+              # para encontrar a pasta "lib" se o padrão for assim, ou ficar no subdiretório 'build/lib'.
               
+              $projectVcxprojParentDir = Split-Path -Path $projectFile -Parent # e.g., "pjlib/build" ou "third_party/build/baseclasses"
+              
+              # Tente o caminho comum onde o MSBuild coloca libs PJSIP (irmão do diretório de build)
+              # Ex: external/pjproject/pjlib/lib/
+              $libDirRelativeToOneLevelUp = Join-Path -Path (Split-Path -Path $projectVcxprojParentDir -Parent) -ChildPath "lib"
+              $outputLibDirCandidate1 = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$libDirRelativeToOneLevelUp"
+
+              # Tente o caminho onde a lib pode estar diretamente dentro do diretório de build (para alguns projetos)
+              # Ex: external/pjproject/pjlib/build/lib/
+              $libDirRelativeInsideBuild = Join-Path -Path $projectVcxprojParentDir -ChildPath "lib"
+              $outputLibDirCandidate2 = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$libDirRelativeInsideBuild"
+
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
-              
-              # Look for the compiled library directly in its expected output location
-              $sourceLibPath = Join-Path -Path $outputLibDir -ChildPath $originalLibNameWithSuffix
-              $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
+
+              # Preferir a primeira opção (irmão do build) e fallback para a segunda (dentro do build)
+              $sourceLibPath = $null
+              if (Test-Path (Join-Path $outputLibDirCandidate1 -ChildPath $originalLibNameWithSuffix)) {
+                  $sourceLibPath = Join-Path $outputLibDirCandidate1 -ChildPath $originalLibNameWithSuffix
+              } elseif (Test-Path (Join-Path $outputLibDirCandidate2 -ChildPath $originalLibNameWithSuffix)) {
+                  $sourceLibPath = Join-Path $outputLibDirCandidate2 -ChildPath $originalLibNameWithSuffix
+              }
+
+              $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue # CORRECTION APPLIED HERE
           
               # Define the central PJSIP lib directory where all renamed libraries should reside
               $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
