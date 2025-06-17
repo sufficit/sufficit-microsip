@@ -16,7 +16,7 @@
 #   - Ajustados os caminhos de include para serem consistentes e garantir que os cabeçalhos PJSIP
 #     são sempre encontrados corretamente pelo compilador do MicroSIP.
 #   - FIXED: Corrigido `ParserError` na definição do atributo "Condition" para ItemDefinitionGroup.
-#     A string agora é tratada como literal usando aspas duplas com escaping de aspas simples internas.
+#     A string agora é tratada como literal usando um here-string literal de aspas simples (`@' '@`).
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -56,8 +56,8 @@ try {
         Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
         $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
         $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
-        # Corrigido: Usar aspas duplas e escapar as aspas simples internas
-        $itemDefinitionGroupNode.SetAttribute("Condition", "'$(Configuration)|$(Platform)'=='Release|x64'")
+        # Corrigido: Usar here-string literal de aspas simples para tratar a string como literal, evitando parsing do PowerShell
+        $itemDefinitionGroupNode.SetAttribute("Condition", '@'$(Configuration)|$(Platform)'=='Release|x64'@')
         $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 
