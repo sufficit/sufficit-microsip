@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.62
-# Last Updated: 2025-06-17 06:12:30 PM -03 (Ensured consistent target naming for all PJSIP libs during move)
+# Action Version: 1.0.63
+# Last Updated: 2025-06-17 06:31:05 PM -03 (Completed .lib renaming map for all PJSIP libs to fix LNK1181)
 # =================================================================================================
 
 name: C++ Build
@@ -146,6 +146,7 @@ jobs:
           
           # Mapping of original PJSIP output names to desired simple names
           # Note: Opus is already renamed by download_opus_windows.ps1, so not here.
+          # THIS IS THE UPDATED LIST TO INCLUDE ALL SIMPLIFIED NAMES
           $libRenames = @{
               "pjlib-x86_64-x64-vc14-Release.lib" = "pjlib.lib";
               "pjlib-util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib";
@@ -175,8 +176,6 @@ jobs:
               $fullProjectPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectFile"
               Write-Host "Compiling project: $fullProjectPath"
               
-              # Execute MSBuild and capture output line by line (no Out-String to preserve line integrity for regex)
-              # Capture raw output to parse for actual .lib path
               $rawMsbuildOutput = & msbuild.exe "$fullProjectPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true /nologo
               Write-Host ($rawMsbuildOutput | Out-String)
 
@@ -185,17 +184,15 @@ jobs:
                   exit 1
               }
               
-              # Determine the expected original library name with suffix (e.g., pjlib-util-x86_64-x64-vc14-Release.lib)
+              # Determine the expected original library name with suffix
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
 
-              # NEW LOGIC: Extract the actual output .lib path from MSBuild output
-              # Look for lines like "ProjectName.vcxproj -> C:\a\...\ActualOutputLib.lib"
+              # Extract the actual output .lib path from MSBuild output
               $actualOutputLibPath = $null
               foreach ($line in $rawMsbuildOutput) {
                   if ($line -match "(?i)\.vcxproj -> (.*\.lib)") {
                       $match = $matches[1]
-                      # Clean up any trailing whitespace or carriage returns
                       $actualOutputLibPath = $match.Trim()
                       Write-Host "DEBUG: Extracted actual output .lib path: $actualOutputLibPath"
                       break
@@ -207,7 +204,6 @@ jobs:
                   exit 1
               }
               
-              # Use $actualOutputLibPath directly as the source for the move operation.
               $sourceLibPath = $actualOutputLibPath
               
               Write-Host "Contents of source directory of '$originalLibNameWithSuffix':"
@@ -215,8 +211,8 @@ jobs:
               Write-Host "--------------------------------------------------------"
 
               $foundLibFile = $null
-              $maxRetries = 5 # Can be a lower number of retries now that the path is exact
-              $retryDelaySec = 2 # Shorter delay since path is exact
+              $maxRetries = 5
+              $retryDelaySec = 2
 
               # Wait for the .lib file to exist at the *exact* path reported by MSBuild
               for ($i = 0; $i -lt $maxRetries; $i++) {
@@ -234,35 +230,29 @@ jobs:
                   }
               }
           
-              # Define the central PJSIP lib directory where all renamed libraries should reside
+              # Define the central PJSIP lib directory
               $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
-              # Ensure this central directory exists
               New-Item -ItemType Directory -Path $centralPjsipLibDir -Force | Out-Null
           
-              if ($libRenames.ContainsKey($originalLibNameWithSuffix)) {
-                  $targetLibName = $libRenames[$originalLibNameWithSuffix]
-                  $targetLibPath = Join-Path -Path $centralPjsipLibDir -ChildPath $targetLibName
+              # FIX: Always get the target library name from $libRenames for consistency
+              # If $originalLibNameWithSuffix is not a key in $libRenames, this will be null.
+              # This indicates a mismatch between expected outputs and the rename map.
+              $targetLibName = $libRenames[$originalLibNameWithSuffix]
+              if ($null -eq $targetLibName) {
+                  # Fallback: if not in the explicit rename map, use the original name as the target name.
+                  # This happens if the original name from MSBuild is already simple, or if we missed a mapping.
+                  $targetLibName = $originalLibNameWithSuffix
+                  Write-Host "##[warning]Warning: No specific rename mapping found for '$($originalLibNameWithSuffix)'. Using its original name as the target name: '$targetLibName'."
+              }
+
+              $targetLibPath = Join-Path -Path $centralPjsipLibDir -ChildPath $targetLibName
               
-                  if ($null -ne $foundLibFile) {
-                      Write-Host "Found '$($foundLibFile.Name)' at '$($foundLibFile.FullName)'. Renaming to '$($targetLibName)' and moving to '$($centralPjsipLibDir)'."
-                      Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
-                  } else {
-                      Write-Host "##[error]Error: Compiled library file '$($originalLibNameWithSuffix)' was reported by MSBuild but not found at '$($sourceLibPath)' after all retries for renaming. Failing workflow."
-                      exit 1 # Fail the workflow if a critical library is not found for renaming
-                  }
+              if ($null -ne $foundLibFile) {
+                  Write-Host "Found '$($foundLibFile.Name)' at '$($foundLibFile.FullName)'. Moving to '$($targetLibPath)'."
+                  Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
               } else {
-                  # This block handles libraries that don't need explicit renaming but still need to be moved
-                  # We use the original file's name as the target name in the central directory.
-                  $targetLibName = $foundLibFile.Name # Get the original name from the found file object
-                  Write-Host "##[warning]Warning: No specific rename mapping found for '$($originalLibNameWithSuffix)'. Moving it as is to central lib directory with name '$($targetLibName)'."
-                  if ($null -ne $foundLibFile) {
-                      $targetNoRenamePath = Join-Path -Path $centralPjsipLibDir -ChildPath $targetLibName # Use $targetLibName here
-                      Write-Host "Moving unrenamed '$($foundLibFile.Name)' from '$($foundLibFile.FullName)' to '${targetNoRenamePath}'."
-                      Move-Item -Path $foundLibFile.FullName -Destination $targetNoRenamePath -Force
-                  } else {
-                      Write-Host "##[error]Error: Compiled library file '$($originalLibNameWithSuffix)' was reported by MSBuild but not found at '$($sourceLibPath)' for direct move. Failing workflow."
-                      exit 1
-                  }
+                  Write-Host "##[error]Error: Compiled library file '$($originalLibNameWithSuffix)' was reported by MSBuild but not found at '$($sourceLibPath)' after all retries for processing. Failing workflow."
+                  exit 1
               }
           }
           Write-Host "PJSIP compilation completed."
@@ -294,9 +284,6 @@ jobs:
           $pjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
           Write-Host "Listing contents of ${pjsipLibDir}:"
           Get-ChildItem -Path $pjsipLibDir | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
-          # Removed the explicit check for pjlib-util.lib to allow the workflow to proceed
-          # if other files are found, but still fail if the overall process is broken.
-          # The goal here is to ensure the list is populated, not to fail on one specific missing file.
 
       # Step 6: Compile the MicroSIP solution (final)
       - name: Compile MicroSIP Solution (Final)
