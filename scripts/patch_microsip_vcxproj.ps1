@@ -16,7 +16,7 @@
 #   - Ajustados os caminhos de include para serem consistentes e garantir que os cabeçalhos PJSIP
 #     são sempre encontrados corretamente pelo compilador do MicroSIP.
 #   - FIXED: Corrigido `ParserError` na definição do atributo "Condition" para ItemDefinitionGroup.
-#     A string agora é tratada como literal usando um here-string literal de aspas simples.
+#     A string agora é tratada como literal usando aspas duplas com escaping de aspas simples internas.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -45,8 +45,7 @@ try {
     
     # Os caminhos PJSIP são agora recebidos como absolutos, então precisamos de torná-los
     # relativos ao diretório do .vcxproj para a propriedade AdditionalIncludeDirectories.
-    # Como microsip.vcxproj está na raiz do repositório, os caminhos relativos são fáceis.
-    # Se o microsip.vcxproj estivesse em um subdiretório, teríamos que ajustar.
+    # Como microsip.vcxproj está na raiz do repositório, estes são os mesmos que os caminhos PJSIP_..._RELATIVE
     $pjsipIncludePathForVcxproj = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipIncludeRoot)
     $pjsipLibPathForVcxproj = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipLibRoot)
     $pjsipAppsIncludePathForVcxproj = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipAppsIncludePath)
@@ -57,8 +56,8 @@ try {
         Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
         $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
         $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
-        # Corrigido: Usar here-string literal de aspas simples para tratar a string como literal, evitando parsing do PowerShell
-        $itemDefinitionGroupNode.SetAttribute("Condition", '$(Configuration)|$(Platform)'=='Release|x64'') # Corrigido aqui
+        # Corrigido: Usar aspas duplas e escapar as aspas simples internas
+        $itemDefinitionGroupNode.SetAttribute("Condition", "'$(Configuration)|$(Platform)'=='Release|x64'")
         $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 
