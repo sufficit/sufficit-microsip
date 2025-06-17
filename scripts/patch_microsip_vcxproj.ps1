@@ -8,9 +8,10 @@
 #     with precisely controlled absolute paths and libraries. This eliminates potential conflicts
 #     from existing relative paths or implicit default behaviors in the .vcxproj, addressing
 #     persistent LNK1181 errors.
-#   - FIXED: Corrected PowerShell parsing error "The term 'LibraryPath' is not recognized".
-#     MSBuild variables like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` are now
-#     correctly treated as literal strings within PowerShell lists by enclosing them in single quotes.
+#   - FIXED: Corrected PowerShell parsing error "No characters are allowed after a here-string header".
+#     The here-string syntax for the XML "Condition" attribute is now correctly formatted.
+#   - Ensured all MSBuild variables like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)`
+#     are passed as literal strings into the XML by enclosing them in single quotes within PowerShell arrays.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -52,8 +53,10 @@ try {
         Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
         $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
         $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
-        # Corrected: Use a single-quoted here-string to treat content literally, preventing ParserError
-        <span class="math-inline">itemDefinitionGroupNode\.SetAttribute\("Condition", @'</span>(Configuration)|$(Platform)'=='Release|x64'@')
+        # Corrected: Use a single-quoted here-string. The closing marker must be on its own line.
+        $itemDefinitionGroupNode.SetAttribute("Condition", @'
+<span class="math-inline">\(Configuration\)\|</span>(Platform)'=='Release|x64'
+'@')
         $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 
