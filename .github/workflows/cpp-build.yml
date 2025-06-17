@@ -11,11 +11,12 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.39
+# Action Version: 1.0.40
 # Last Updated: 2025-06-17
 # Description of Changes:
-#   - FIXED: Corrected the format string for `BUILD_DATE` using `format-datetime` filter,
-#     resolving the "Unexpected symbol: '0-3'" error.
+#   - FIXED: Implemented a dedicated PowerShell step to calculate and set `BUILD_DATE`
+#     using `Get-Date -UFormat`, resolving all previous formatting errors by bypassing
+#     limitations of GitHub Actions expression functions.
 #   - FIXED: The `patch_microsip_vcxproj.ps1` script now correctly handles MSBuild properties
 #     like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` by enclosing them in
 #     single quotes to prevent PowerShell parsing errors.
@@ -34,11 +35,9 @@ on:
       - 'v*.*.*' # Trigger on version tags like v1.0.0
 
 env:
-  # Robust timestamp formatting using the format-datetime filter.
-  # github.run_started_at is typically in ISO 8601 format, which format-datetime can handle.
-  BUILD_DATE: ${{ format-datetime(github.run_started_at, 'yyyyMMdd-HHmmss') }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Automatically provided by GitHub Actions
   GH_PAT: ${{ secrets.GH_PAT }} # For accessing private repositories/releases if needed
+  # BUILD_DATE will be set in a separate step using PowerShell
 
 jobs:
   build-windows:
@@ -60,6 +59,16 @@ jobs:
           path: external/pjproject
           token: ${{ env.GITHUB_TOKEN }} # Use default GITHUB_TOKEN for public repo, or GH_PAT for private
           submodules: false # PJSIP's submodules are not needed for pre-compiled Opus
+
+      # Step to define BUILD_DATE using PowerShell
+      - name: Definir Variável BUILD_DATE
+        shell: pwsh
+        run: |
+          # Get current UTC date/time and format it
+          $buildDate = (Get-Date -UFormat %Y%m%d-%H%M%S)
+          Write-Host "Calculated BUILD_DATE: $buildDate"
+          # Set as a workflow environment variable for subsequent steps
+          Write-Host "BUILD_DATE=$buildDate" >> $env:GITHUB_ENV
 
       # Step 1: Configurar MSBuild
       - name: Configurar MSBuild
