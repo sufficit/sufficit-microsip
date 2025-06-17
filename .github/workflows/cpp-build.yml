@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.47
-# Last Updated: 2025-06-17 12:58:08 PM -03
+# Action Version: 1.0.48
+# Last Updated: 2025-06-17 01:05:25 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -182,9 +182,9 @@ jobs:
                   exit 1
               }
               
-              # Determine the base logical directory of the project (e.g., "pjlib", "pjlib-util", "pjsip", "third_party")
-              # e.g., "pjlib/build/pjlib.vcxproj" -> "pjlib"
-              # e.g., "third_party/build/baseclasses/libbaseclasses.vcxproj" -> "third_party"
+              # Determine the base directory of the .vcxproj file itself
+              $vcxprojDir = Split-Path -Path $fullProjectPath -Parent # e.g., "C:\...\external\pjproject\pjlib\build"
+
               $projectRootComponent = $projectFile.Split('/')[0] # Pega o primeiro segmento do caminho (pjlib, third_party, etc.)
               
               $outputLibDir = $null
