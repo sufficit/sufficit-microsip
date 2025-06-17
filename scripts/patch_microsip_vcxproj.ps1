@@ -10,7 +10,7 @@
 #     de GetRelativePath ou Join-Path dentro deste script para os caminhos PJSIP.
 #   - Adicionado o bloco `param` para aceitar `PjsipIncludeRoot`, `PjsipLibRoot`,
 #     e `PjsipAppsIncludePath` como parâmetros, resolvendo o erro "A parameter cannot be found".
-#   - Adicionadas verificações para garantir que os nós `ClCompile` e `Link` são encontrados,
+#   - Adicionadas verificações para garantir que os nódulos `ClCompile` e `Link` são encontrados,
 #     e se não forem, o script tenta criá-los antes de adicionar os includes/libs.
 #     Isto deve resolver o aviso "Could not find Linker node".
 #   - Ajustados os caminhos de include para serem consistentes e garantir que os cabeçalhos PJSIP
@@ -20,6 +20,9 @@
 #   - FIXED: Added `external/pjproject/third_party/lib` to `AdditionalLibraryDirectories`
 #     to resolve `LNK1181: cannot open input file 'libyuv.lib'` error.
 #   - FIXED: Removed trailing comma in `$requiredLibDirs` and other arrays to resolve "Missing expression after ','" ParserError.
+#   - NEW: Aggressively manages `AdditionalLibraryDirectories` and `AdditionalDependencies`
+#     to ensure only desired paths and libraries are present, by explicitly replacing content
+#     instead of appending or conditionally adding.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -102,32 +105,17 @@ try {
 
     $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
 
-    # Concatenate and filter out duplicates
-    $currentIncludes = if ($additionalIncludeDirsNode) { $additionalIncludeDirsNode.'#text' } else { "" }
-    $newIncludesArray = $currentIncludes.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
-
-    foreach ($includePath in $requiredIncludes) {
-        # Add only if not already present
-        if ($newIncludesArray -notcontains $includePath) {
-            $newIncludesArray += $includePath
-        }
+    # Re-create or explicitly set the node content to ensure desired paths are present
+    if (-not $additionalIncludeDirsNode) {
+        $additionalIncludeDirsNode = $projXml.CreateElement("AdditionalIncludeDirectories", $nsManager.LookupNamespace("msbuild"))
+        $clCompileNode.AppendChild($additionalIncludeDirsNode)
     }
-    $newIncludesString = ($newIncludesArray | Select-Object -Unique) -join ';' # Ensure unique and rejoin
+    # Set the content explicitly, combining unique required paths with existing ones (if any)
+    $existingIncludes = $additionalIncludeDirsNode.'#text'.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
+    $finalIncludes = ($requiredIncludes + $existingIncludes) | Select-Object -Unique
+    $additionalIncludeDirsNode.'#text' = ($finalIncludes -join ';')
+    Write-Host "Updated AdditionalIncludeDirectories in $ProjFile to include all necessary paths."
 
-    if ($additionalIncludeDirsNode) {
-        # Check if actual change is needed to avoid unnecessary file writes
-        if ($newIncludesString -ne $currentIncludes) {
-            $additionalIncludeDirsNode.'#text' = "$newIncludesString;%(AdditionalIncludeDirectories)"
-            Write-Host "Updated AdditionalIncludeDirectories in $ProjFile to include all necessary paths."
-        } else {
-            Write-Host "All necessary include paths already present in AdditionalIncludeDirectories."
-        }
-    } else {
-        $newIncludeNode = $projXml.CreateElement("AdditionalIncludeDirectories", $nsManager.LookupNamespace("msbuild"))
-        $newIncludeNode.'#text' = "$newIncludesString;%(AdditionalIncludeDirectories)"
-        $clCompileNode.AppendChild($newIncludeNode)
-        Write-Host "Added AdditionalIncludeDirectories node with all necessary paths in $ProjFile."
-    }
 
     # Processar Library Directories e Dependencies
     # Add PJSIP library directories
@@ -135,34 +123,20 @@ try {
     
     # Define all required library directories relative to microsip.vcxproj
     $requiredLibDirs = @(
-        $pjsipLibRoot, # This is the absolute path to external/pjproject/lib
-        (Join-Path -Path $PjsipIncludeRoot -ChildPath "third_party/lib") # Path to built third-party libs like libyuv.lib
-    ) | ForEach-Object { [System.IO.Path]::GetRelativePath($microsipProjectDir, $_) } # Convert absolute paths to relative paths
+        $pjsipLibPathForVcxproj, # This is the absolute path to external/pjproject/lib, converted to relative
+        (Join-Path -Path $PjsipIncludeRoot -ChildPath "third_party/lib") | ForEach-Object { [System.IO.Path]::GetRelativePath($microsipProjectDir, $_) } # Path to built third-party libs like libyuv.lib, converted to relative
+    )
 
-    $currentLibDirs = if ($additionalLibraryDirsNode) { $additionalLibraryDirsNode.'#text' } else { "" }
-    $newLibDirsArray = $currentLibDirs.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
-
-    foreach ($libPath in $requiredLibDirs) {
-        # Add only if not already present
-        if ($newLibDirsArray -notcontains $libPath) {
-            $newLibDirsArray += $libPath
-        }
+    # Re-create or explicitly set the node content to ensure desired paths are present
+    if (-not $additionalLibraryDirsNode) {
+        $additionalLibraryDirsNode = $projXml.CreateElement("AdditionalLibraryDirectories", $nsManager.LookupNamespace("msbuild"))
+        $linkerNode.AppendChild($additionalLibraryDirsNode)
     }
-    $newLibDirsString = ($newLibDirsArray | Select-Object -Unique) -join ';' # Ensure unique and rejoin
-
-    if ($additionalLibraryDirsNode) {
-        if ($newLibDirsString -ne $currentLibDirs) {
-            $additionalLibraryDirsNode.'#text' = "$newLibDirsString;%(AdditionalLibraryDirectories)"
-            Write-Host "Updated AdditionalLibraryDirectories in $ProjFile to include all necessary library paths."
-        } else {
-            Write-Host "All necessary library paths already present in AdditionalLibraryDirectories."
-        }
-    } else {
-        $newLibNode = $projXml.CreateElement("AdditionalLibraryDirectories", $nsManager.LookupNamespace("msbuild"))
-        $newLibNode.'#text' = "$newLibDirsString;%(AdditionalLibraryDirectories)"
-        $linkerNode.AppendChild($newLibNode)
-        Write-Host "Added AdditionalLibraryDirectories node with all necessary library paths in $ProjFile."
-    }
+    # Set the content explicitly, combining unique required paths with existing ones (if any)
+    $existingLibDirs = $additionalLibraryDirsNode.'#text'.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
+    $finalLibDirs = ($requiredLibDirs + $existingLibDirs) | Select-Object -Unique
+    $additionalLibraryDirsNode.'#text' = ($finalLibDirs -join ';')
+    Write-Host "Updated AdditionalLibraryDirectories in $ProjFile to include all necessary library paths."
 
     # Add PJSIP additional dependencies (libraries)
     # NOTE: Assumimos que estes são os nomes dos ficheiros .lib gerados
@@ -190,7 +164,7 @@ try {
         "libsrtp.lib",
         "libwebrtc.lib",
         "libyuv.lib",
-        "libopus.lib" # From our opus download
+        "libopus.lib", # From our opus download
         # Common Windows libs that PJSIP might need for linking
         "ws2_32.lib",
         "advapi32.lib",
@@ -209,27 +183,16 @@ try {
 
     $additionalDependenciesNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalDependencies", $nsManager)
 
-    if ($additionalDependenciesNode) {
-        $currentDependencies = $additionalDependenciesNode.'#text'
-        $newDependencies = $currentDependencies
-        # Adicionar apenas as libs que ainda não estão presentes
-        foreach ($lib in $pjsipLibs) {
-            if ($currentDependencies -notmatch [regex]::Escape($lib)) {
-                $newDependencies = "$lib;$newDependencies"
-            }
-        }
-        if ($newDependencies -ne $currentDependencies) {
-            $additionalDependenciesNode.'#text' = "$newDependencies;%(AdditionalDependencies)"
-            Write-Host "Updated AdditionalDependencies in $ProjFile to include PJSIP libraries."
-        } else {
-            Write-Host "PJSIP libraries already present in AdditionalDependencies."
-        }
-    } else {
-        $newDepNode = $projXml.CreateElement("AdditionalDependencies", $nsManager.LookupNamespace("msbuild"))
-        $newDepNode.'#text' = "$pjsipLibsString;%(AdditionalDependencies)"
-        $linkerNode.AppendChild($newDepNode)
-        Write-Host "Added AdditionalDependencies node with PJSIP libraries in $ProjFile."
+    # Re-create or explicitly set the node content to ensure desired dependencies are present
+    if (-not $additionalDependenciesNode) {
+        $additionalDependenciesNode = $projXml.CreateElement("AdditionalDependencies", $nsManager.LookupNamespace("msbuild"))
+        $linkerNode.AppendChild($additionalDependenciesNode)
     }
+    # Set the content explicitly, combining unique required dependencies with existing ones (if any)
+    $existingDependencies = $additionalDependenciesNode.'#text'.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
+    $finalDependencies = ($pjsipLibs + $existingDependencies) | Select-Object -Unique
+    $additionalDependenciesNode.'#text' = ($finalDependencies -join ';')
+    Write-Host "Updated AdditionalDependencies in $ProjFile to include all necessary PJSIP libraries."
 
     $projXml.Save($ProjFile)
     Write-Host "Successfully patched $ProjFile."
