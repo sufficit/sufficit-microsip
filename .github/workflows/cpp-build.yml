@@ -11,9 +11,11 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.41
+# Action Version: 1.0.42
 # Last Updated: 2025-06-17
 # Description of Changes:
+#   - FIXED: Added detailed comments in English to the BUILD_DATE definition, explaining
+#     the troubleshooting steps taken to achieve a robust timestamp.
 #   - FIXED: Implemented a dedicated PowerShell step to calculate and set `BUILD_DATE`
 #     using `Get-Date -UFormat`, resolving all previous formatting errors by bypassing
 #     limitations of GitHub Actions expression functions.
@@ -23,7 +25,8 @@
 #   - FIXED: Corrected the path logic for renaming PJSIP libraries within the workflow YAML,
 #     ensuring the correct `.lib` files are found and renamed. This directly addresses
 #     the 'Warning: Original library file ... not found' messages and should finally
-#     resolve the `LNK1181: cannot open input file 'pjlib.lib'` error.
+#     resolve the `LNK1181: cannot open input file 'pjlib.lib'` error by moving
+#     all renamed PJSIP libraries to a single, central `external/pjproject/lib` directory.
 # =================================================================================================
 
 name: Compilar MicroSIP no Windows
@@ -62,6 +65,21 @@ jobs:
           submodules: false # PJSIP's submodules are not needed for pre-compiled Opus
 
       # Step to define BUILD_DATE using PowerShell
+      # --- BUILD_DATE Formatting Troubleshooting History ---
+      # 1. Initial attempt: format('{0:yyyyMMdd-HHmmss}', github.event.head_commit.timestamp)
+      #    Issue: "The format specifiers 'yyyyMMdd-HHmmss' are not valid for objects of type 'String'"
+      #    Reason: GitHub Actions' `format` function expects a DateTime object for date formatting, but `timestamp` is a string.
+      # 2. Second attempt: format('{0:yyyyMMdd-HHmmss}', fromiso8601(github.event.head_commit.timestamp))
+      #    Issue: "Unrecognized function: 'fromiso8601'"
+      #    Reason: `fromiso8601` is not a directly available built-in function in GitHub Actions expressions.
+      # 3. Third attempt: format('{0:yyyyMMdd-HHmmss}', github.run_started_at)
+      #    Issue: "The format specifiers 'yyyyMMdd-HHmmss' are not valid for objects of type 'Null'"
+      #    Reason: Similar to #1, or `github.run_started_at` might sometimes be null or not a parsable DateTime object in this specific context.
+      # 4. Current solution (most robust): Use an inline PowerShell script.
+      #    This leverages PowerShell's native Get-Date cmdlet with -UFormat to guarantee
+      #    correct UTC date/time formatting, and sets the result as an environment variable
+      #    for subsequent steps. This bypasses all GitHub Actions expression parsing complexities for dates.
+      # ----------------------------------------------------
       - name: Definir Variável BUILD_DATE
         shell: pwsh
         run: |
@@ -189,25 +207,29 @@ jobs:
                   exit 1
               }
               
-              # Rename the output .lib file
-              # The output .lib files are typically in a 'lib' directory that is a sibling to the 'build' directory.
-              $projectDirBase = Split-Path -Path (Split-Path -Path $fullProjectPath -Parent) -Parent # e.g., C:\a\sufficit-microsip\sufficit-microsip\external\pjproject\pjlib
-              $actualOutputLibDir = Join-Path -Path $projectDirBase -ChildPath "lib" # e.g., C:\a\sufficit-microsip\sufficit-microsip\external\pjproject\pjlib\lib
-
+              # Rename and move the output .lib file to a central 'lib' directory
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
-              
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
-              $originalLibPath = Join-Path -Path $actualOutputLibDir -ChildPath $originalLibNameWithSuffix
+              
+              # Search for the newly compiled library file within the entire external/pjproject directory
+              # This is robust against variations in MSBuild's exact output path.
+              $foundLibFile = Get-ChildItem -Path $env:GITHUB_WORKSPACE\external\pjproject -Filter $originalLibNameWithSuffix -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+
+              # Define the central PJSIP lib directory where all renamed libraries should reside
+              $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
+              # Ensure this central directory exists
+              New-Item -ItemType Directory -Path $centralPjsipLibDir -Force | Out-Null
 
               if ($libRenames.ContainsKey($originalLibNameWithSuffix)) {
                   $targetLibName = $libRenames[$originalLibNameWithSuffix]
-                  $targetLibPath = Join-Path -Path $actualOutputLibDir -ChildPath $targetLibName
+                  $targetLibPath = Join-Path -Path $centralPjsipLibDir -ChildPath $targetLibName
 
-                  if (Test-Path $originalLibPath) {
-                      Write-Host "Renaming $($originalLibNameWithSuffix) to $($targetLibName) in $($actualOutputLibDir)"
-                      Rename-Item -Path $originalLibPath -NewName $targetLibName -Force
+                  if ($null -ne $foundLibFile) {
+                      Write-Host "Found '$($originalLibNameWithSuffix)' at '$($foundLibFile.FullName)'. Renaming to '$($targetLibName)' and moving to '$($centralPjsipLibDir)'."
+                      Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
                   } else {
-                      Write-Host "##[warning]Warning: Original library file '$($originalLibNameWithSuffix)' not found at '$($originalLibPath)'. Skipping rename."
+                      Write-Host "##[error]Error: Original library file '$($originalLibNameWithSuffix)' not found after compilation! Check PJSIP build logs. Failing workflow."
+                      exit 1 # Fail the workflow if a critical library is not found for renaming
                   }
               } else {
                   Write-Host "##[warning]Warning: No rename mapping found for '$($originalLibNameWithSuffix)'. Leaving as is."
