@@ -21,9 +21,11 @@
 #     A causa foi a ausência desses ficheiros no diretório 'scripts/'. A solução é que
 #     estes ficheiros devem ser adicionados e committados ao repositório 'sufficit-microsip/scripts'.
 #     Os conteúdos sugeridos para esses ficheiros foram fornecidos.
-#   - TENTATIVA: A etapa de compilação do PJSIP foi modificada para excluir projetos problemáticos
-#     (principalmente projetos .csproj e .vcxproj relacionados a UWP/WP8) que causavam o erro
-#     "The target 'Rebuild' does not exist in the project".
+#   - TENTATIVA FALHADA: A exclusão de projetos problemáticos via `/p:ExcludeProjectsFromBuild`
+#     no MSBuild falhou com o erro "MSB1006: Property is not valid". Esta propriedade não é
+#     um parâmetro de linha de comando para exclusão direta de projetos por GUID.
+#   - SOLUÇÃO ATUAL: Em vez de tentar excluir, agora compilamos APENAS os projetos PJSIP
+#     conhecidamente necessários para o MicroSIP, listando-os explicitamente para o MSBuild.
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -140,7 +142,8 @@ jobs:
           # foi modificado para remover o bloco `param` e ler o `$env:GH_PAT` diretamente. A execução
           # via ficheiro temporário com codificação controlada foi mantida para robustez.
           #
-          # Solução proposta atual para o problema `MSB4057`: Excluir projetos problemáticos da compilação.
+          # Solução proposta para o problema `MSB4057` (tentativa anterior): Excluir projetos problemáticos
+          # da compilação via `/p:ExcludeProjectsFromBuild`. Isso falhou com "MSB1006: Property is not valid."
           
           $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8 # Garante que a leitura é UTF8
           # Usa a classe .NET para criar uma codificação UTF8 sem BOM
@@ -170,42 +173,44 @@ jobs:
           Write-Host "pjmedia_codec.vcxproj patched."
 
           # Compilar a solução PJSIP
-          Write-Host "Compilando solução PJSIP..."
-          $pjSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjproject-vs14.sln"
-
-          # Histórico de problemas com MSBuild:
-          # O MSBuild está a falhar com "The target 'Rebuild' does not exist in the project" para
-          # projetos .csproj e .vcxproj de UWP/WP8 que fazem parte da solução PJSIP, mas não são
-          # essenciais para a compilação da biblioteca principal do PJSIP para Windows desktop.
-          # Para resolver, vamos usar a opção `/p:ExcludeRestorePackageFolders=true` e excluir
-          # projetos que não têm o target Rebuild ou que são específicos de UWP/WP8
-          # (que não são compiláveis no ambiente padrão).
-          
-          # Tentativa de exclusão de projetos problemáticos.
-          # Os GUIDs e nomes de projetos abaixo são exemplos dos que geralmente causam problemas
-          # em ambientes CI se não forem específicos para UWP/WP8.
-          # Você pode precisar ajustar esta lista com base nos seus logs exatos.
-          $excludeProjects = @(
-              "{5B521251-4045-42DB-A343-C195FC47EF0D}", # pjsua_cli_uwp.csproj
-              "{E5306B62-2300-410E-926B-98782D794E78}", # pjsua_cli_wp8.csproj
-              "{313BE839-D21F-438D-8822-04987E84218C}", # pjsua_cli_uwp_comp.vcxproj
-              "{2E31D61D-2E32-46A2-9E39-16584284534F}", # Voip.csproj
-              "{5043B087-C19B-4081-AEB2-5503023E28B0}", # VoipBackEnd.vcxproj
-              "{4C2A34C3-A833-4029-9F4F-F9651D8354A8}", # VoipHost.vcxproj
-              "{92E36D99-A7A2-4217-AE84-180D21626C11}"  # VoipTasks.csproj
+          Write-Host "Compilando projetos PJSIP essenciais..."
+          $pjsipProjectsToBuild = @(
+              "pjlib/build/pjlib.vcxproj",
+              "pjlib-util/build/pjlib_util.vcxproj",
+              "pjnath/build/pjnath.vcxproj",
+              "pjmedia/build/pjmedia.vcxproj",
+              "pjmedia/build/pjmedia_audiodev.vcxproj",
+              "pjmedia/build/pjmedia_codec.vcxproj",
+              "pjmedia/build/pjmedia_videodev.vcxproj",
+              "pjsip/build/pjsip_core.vcxproj",
+              "pjsip/build/pjsip_simple.vcxproj",
+              "pjsip/build/pjsip_ua.vcxproj",
+              "pjsip/build/pjsua_lib.vcxproj",
+              "pjsip/build/pjsua2_lib.vcxproj",
+              "third_party/build/baseclasses/libbaseclasses.vcxproj",
+              "third_party/build/g7221/libg7221codec.vcxproj",
+              "third_party/build/gsm/libgsmcodec.vcxproj",
+              "third_party/build/ilbc/libilbccodec.vcxproj",
+              "third_party/build/milenage/libmilenage.vcxproj",
+              "third_party/build/resample/libresample.vcxproj",
+              "third_party/build/speex/libspeex.vcxproj",
+              "third_party/build/srtp/libsrtp.vcxproj",
+              "third_party/build/webrtc/libwebrtc.vcxproj",
+              "third_party/build/yuv/libyuv.vcxproj"
           )
-          $excludeProjectsString = $excludeProjects -join ';'
 
-          # O script build_pjsip.ps1 está na raiz do repositório principal (sufficit-microsip)
-          # Passamos a lista de projetos a excluir para msbuild diretamente.
-          # A opção /p:ExcludeRestorePackageFolders=true pode ajudar com projetos .NET Core
-          & msbuild.exe "$pjSlnPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true /p:ExcludeProjectsFromBuild="$excludeProjectsString"
-          
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "##[error]A compilação da solução PJSIP falhou."
-              exit 1
+          # Compilar cada projeto PJSIP essencial individualmente
+          foreach ($projectFile in $pjsipProjectsToBuild) {
+              $fullProjectPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectFile"
+              Write-Host "Compilando projeto: $fullProjectPath"
+              # Usamos /p:ExcludeRestorePackageFolders=true para evitar problemas de restauração de pacotes
+              # .NET em projetos C++ (embora o problema principal sejam os .csproj)
+              & msbuild.exe "$fullProjectPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Host "##[error]A compilação do projeto PJSIP $projectFile falhou."
+                  exit 1
+              }
           }
-          Write-Host "scripts/build_pjsip.ps1 concluído com LASTEXITCODE: $LASTEXITCODE."
           Write-Host "Compilação PJSIP concluída."
 
           # Voltar para o diretório raiz do MicroSIP
