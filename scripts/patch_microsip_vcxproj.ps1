@@ -56,8 +56,9 @@ try {
         Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
         $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
         $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
-        # Corrigido: Usar here-string literal de aspas simples para tratar a string como literal, evitando parsing do PowerShell
-        $itemDefinitionGroupNode.SetAttribute("Condition", '@'$(Configuration)|$(Platform)'=='Release|x64'@')
+        # Set the Condition attribute to the literal string '$(Configuration)|$(Platform)'=='Release|x64'.
+        # In PowerShell, this is represented by enclosing it in single quotes and doubling any internal single quotes.
+        $itemDefinitionGroupNode.SetAttribute("Condition", '''$(Configuration)|$(Platform)''==''Release|x64''')
         $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 
