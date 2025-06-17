@@ -10,19 +10,25 @@
 #   - Ensures all PJSIP include paths are correctly prefixed with $(ProjectDir)lib\pjproject\.
 #   - The PjsipAppsIncludePath parameter is now used to ensure pjsua.h (and other pjsip/include)
 #     headers are found correctly by including the pjsip/include path.
+#   - FIXED: Adicionado o bloco `param` para aceitar `PjsipIncludeRoot`, `PjsipLibRoot`,
+#     e `PjsipAppsIncludePath` como parâmetros, resolvendo o erro "A parameter cannot be found".
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
     [string]$ProjFile,
     [Parameter(Mandatory=$true)]
-    [string]$PjsipIncludeRoot, # e.g., 'lib/pjproject'
+    [string]$PjsipIncludeRoot, # e.g., 'external/pjproject' (relative to MicroSIP root)
     [Parameter(Mandatory=$true)]
-    [string]$PjsipLibRoot, # e.g., 'lib/pjproject'
-    [Parameter(Mandatory=$true)] # Este parâmetro agora aponta para 'lib/pjproject/pjsip/include'
-    [string]$PjsipAppsIncludePath # e.g., 'lib/pjproject/pjsip/include' (onde pjsua.h pode estar)
+    [string]$PjsipLibRoot, # e.g., 'external/pjproject/lib' (relative to MicroSIP root)
+    [Parameter(Mandatory=$true)]
+    [string]$PjsipAppsIncludePath # e.g., 'external/pjproject/pjsip/include' (where pjsua.h may be)
 )
 
 Write-Host "Executing patch script for MicroSIP: $ProjFile"
+Write-Host "PjsipIncludeRoot received: $PjsipIncludeRoot"
+Write-Host "PjsipLibRoot received: $PjsipLibRoot"
+Write-Host "PjsipAppsIncludePath received: $PjsipAppsIncludePath"
+
 
 try {
     [xml]$projXml = Get-Content $ProjFile
@@ -39,18 +45,16 @@ try {
         # Add ALL necessary include directories:
         # 1. MicroSIP's own directories
         # 2. Third-party libraries specifically for MicroSIP (e.g., jsoncpp)
-        # 3. All PJSIP core include directories
+        # 3. All PJSIP core include directories (using the passed parameters)
         $requiredIncludes = @(
             "$(ProjectDir)" # For root headers like stdafx.h, global.h, mainDlg.h
             "$(ProjectDir)lib" # For headers in MicroSIP's lib folder like MSIP.h, CListCtrl_ToolTip.h, etc.
             "$(ProjectDir)lib\jsoncpp" # For json.h
-            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjlib/include"    # For pj/types.h, etc.
-            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjlib-util/include"
-            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjnath/include"
-            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjmedia/include"
-            Join-Path -Path "$(ProjectDir)$PjsipIncludeRoot" -ChildPath "pjsip/include" # Contains pjsua-lib folder and pjsua.h within it
-            # The $PjsipAppsIncludePath is now covered by "$(ProjectDir)$PjsipIncludeRoot\pjsip\include"
-            # as PjsipAppsIncludePath is expected to be "lib/pjproject/pjsip/include" which is derived from $PjsipIncludeRoot
+            "$(ProjectDir)$PjsipIncludeRoot/pjlib/include"    # For pj/types.h, etc.
+            "$(ProjectDir)$PjsipIncludeRoot/pjlib-util/include"
+            "$(ProjectDir)$PjsipIncludeRoot/pjnath/include"
+            "$(ProjectDir)$PjsipIncludeRoot/pjmedia/include"
+            "$(ProjectDir)$PjsipAppsIncludePath" # Contains pjsua-lib folder and pjsua.h within it
         )
 
         $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
@@ -86,7 +90,7 @@ try {
     }
 
     if ($linkerNode) {
-        # Add PJSIP library directories
+        # Add PJSIP library directories (using the passed parameter)
         $additionalLibraryDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
         $pjsipLibPathFull = "$(ProjectDir)$PjsipLibRoot" # Full path to the libs folder
 
@@ -106,36 +110,54 @@ try {
         }
 
         # Add PJSIP additional dependencies (libraries)
-        $additionalDependenciesNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalDependencies", $nsManager)
+        # NOTE: Assumimos que estes são os nomes dos ficheiros .lib gerados
+        # pela compilação anterior dos projetos individuais.
         $pjsipLibs = @(
-            "pjlib-test.lib"
-            "pjlib-util-test.lib"
-            "pjnath-test.lib"
-            "pjmedia-test.lib"
-            "pjsip-test.lib"
-            "pjsip-ua-test.lib"
-            "pjsip-simple-test.lib"
-            "pjsua-lib.lib" # Crucial for pjsua.h
-            "libopus.lib" # From our opus download
+            "pjlib.lib",
+            "pjlib-util.lib",
+            "pjnath.lib",
+            "pjmedia.lib",
+            "pjmedia-audiodev.lib",
+            "pjmedia-codec.lib",
+            "pjmedia-videodev.lib",
+            "pjsip-core.lib",
+            "pjsip-simple.lib",
+            "pjsip-ua.lib",
+            "pjsua-lib.lib", # Crucial for pjsua.h
+            "pjsua2-lib.lib",
+            "libbaseclasses.lib",
+            "libg7221codec.lib",
+            "libgsmcodec.lib",
+            "libilbccodec.lib",
+            "libmilenage.lib",
+            "libresample.lib",
+            "libspeex.lib",
+            "libsrtp.lib",
+            "libwebrtc.lib",
+            "libyuv.lib",
+            "libopus.lib", # From our opus download
             # Common Windows libs that PJSIP might need for linking
-            "ws2_32.lib"
-            "advapi32.lib"
-            "iphlpapi.lib"
-            "mswsock.lib"
-            "ole32.lib"
-            "winmm.lib"
-            "user32.lib"
-            "gdi32.lib"
-            "crypt32.lib"
+            "ws2_32.lib",
+            "advapi32.lib",
+            "iphlpapi.lib",
+            "mswsock.lib",
+            "ole32.lib",
+            "winmm.lib",
+            "user32.lib",
+            "gdi32.lib",
+            "crypt32.lib",
             "dnsapi.lib"
-            # Add any other specific PJSIP libraries your MicroSIP build needs
+            # Adicione quaisquer outras bibliotecas específicas que o seu MicroSIP precise para ligar
         )
-        $pjsipLibsString = $pjsipLibs | ForEach-Object { "$_;" }
-        $pjsipLibsString = $pjsipLibsString -join ''
+        # Juntar os nomes das libs com ponto e vírgula
+        $pjsipLibsString = $pjsipLibs -join ';'
+
+        $additionalDependenciesNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalDependencies", $nsManager)
 
         if ($additionalDependenciesNode) {
             $currentDependencies = $additionalDependenciesNode.'#text'
             $newDependencies = $currentDependencies
+            # Adicionar apenas as libs que ainda não estão presentes
             foreach ($lib in $pjsipLibs) {
                 if ($currentDependencies -notmatch [regex]::Escape($lib)) {
                     $newDependencies = "$lib;$newDependencies"
