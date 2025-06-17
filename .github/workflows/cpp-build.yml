@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.46
-# Last Updated: 2025-06-17 12:53:27 PM -03
+# Action Version: 1.0.47
+# Last Updated: 2025-06-17 12:58:08 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -41,7 +41,6 @@ jobs:
         with:
           repository: sufficit/sufficit-microsip
           path: . # Checkout to the root of the workspace
-          # FIX: Explicitly pass the token here. This was the recurring error.
           token: ${{ secrets.GH_PAT }}
           fetch-depth: 1 # Only fetch the latest commit
           # IMPORTANT: Removed 'submodules: recursive' because 'sufficit/pjproject'
@@ -55,7 +54,6 @@ jobs:
         with:
           repository: sufficit/pjproject
           path: external/pjproject # Checkout to the desired subdirectory
-          # FIX: Explicitly pass the token here. This was the missing piece.
           token: ${{ secrets.GH_PAT }}
           submodules: false # No submodules within pjproject itself are needed
           ssh-strict: true
@@ -187,24 +185,24 @@ jobs:
               # Determine the base logical directory of the project (e.g., "pjlib", "pjlib-util", "pjsip", "third_party")
               # e.g., "pjlib/build/pjlib.vcxproj" -> "pjlib"
               # e.g., "third_party/build/baseclasses/libbaseclasses.vcxproj" -> "third_party"
-              $projectBaseName = $projectFile.Split('/')[0] # Pega o primeiro segmento do caminho
+              $projectRootComponent = $projectFile.Split('/')[0] # Pega o primeiro segmento do caminho (pjlib, third_party, etc.)
               
               $outputLibDir = $null
-              if ($projectBaseName -eq "third_party") {
-                  # Para projetos em third_party, o diretório lib é um nível acima do "build"
+              if ($projectRootComponent -eq "third_party") {
+                  # Para projetos em third_party, o diretório lib é um nível acima do "build", dentro de "third_party"
                   # Ex: third_party/build/baseclasses/libbaseclasses.vcxproj -> external/pjproject/third_party/lib
                   $outputLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/third_party/lib"
               } else {
-                  # Para outros projetos (pjlib, pjlib-util, pjnath, pjmedia, pjsip), o diretório lib
-                  # é irmã da pasta de projeto (e.g., pjlib/lib)
+                  # Para os projetos PJSIP principais (pjlib, pjlib-util, pjnath, pjmedia, pjsip),
+                  # a saída está em [component]/lib, um nível acima da pasta 'build'
                   # Ex: pjlib/build/pjlib.vcxproj -> external/pjproject/pjlib/lib
-                  $outputLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectBaseName/lib"
+                  $outputLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectRootComponent/lib"
               }
 
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
               
-              # A sourceLibPath é agora mais diretamente construída
+              # Construct the source library path directly based on the determined outputLibDir
               $sourceLibPath = Join-Path -Path $outputLibDir -ChildPath $originalLibNameWithSuffix
               $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
           
