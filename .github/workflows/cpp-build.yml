@@ -21,19 +21,20 @@
 #     A causa foi a ausência desses ficheiros no diretório 'scripts/'. A solução é que
 #     estes ficheiros devem ser adicionados e committados ao repositório 'sufficit-microsip/scripts'.
 #     Os conteúdos sugeridos para esses ficheiros foram fornecidos.
-#   - TENTATIVA FALHADA: A exclusão de projetos problemáticos via `/p:ExcludeProjectsFromBuild`
+#   - TENTATIVA FALHADA: A exclusão de projetos problemáticos via `/p:ExcludeRestorePackageFolders=true`
 #     no MSBuild falhou com o erro "MSB1006: Property is not valid". Esta propriedade não é
 #     um parâmetro de linha de comando para exclusão direta de projetos por GUID.
 #   - SOLUÇÃO ATUAL (PJSIP Build): Em vez de tentar excluir, agora compilamos APENAS os projetos PJSIP
 #     conhecidamente necessários para o MicroSIP, listando-os explicitamente para o MSBuild.
 #     Esta etapa foi bem-sucedida nos últimos logs.
 #   - FIXED: Erro "Cannot bind argument to parameter 'PjsipLibRoot' because it is an empty string."
-#     A causa foi a variável `$pjsipLibRoot` não ser passada corretamente para o `patch_microsip_vcxproj.ps1`.
+#     A causa foi a variável `$pjsipLibRoot` não ser passada corretamente para o `patch_microsip_vcxproj.ps1` na Step 5.
 #     Agora, garantimos que todas as variáveis de caminho são passadas explicitamente como parâmetros
-#     para o script de patch.
+#     para o script de patch em ambas as etapas onde ele é usado.
 #   - FIXED: Erro "A parameter cannot be found that matches parameter name 'PjsipIncludeRoot'."
-#     A causa foi a chamada a `patch.ps1` em vez de `patch_microsip_vcxproj.ps1` na etapa de compilação do PJSIP.
-#     A chamada foi corrigida para usar o nome de ficheiro correto.
+#     A causa foi a chamada a `patch.ps1` em vez de `patch_microsip_vcxproj.ps1` na Step 4. Além disso,
+#     as variáveis de caminho não estavam definidas no escopo do `run` block da Step 4 antes de serem usadas.
+#     A chamada foi corrigida para usar o nome de ficheiro correto e as variáveis são agora definidas localmente.
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -172,13 +173,19 @@ jobs:
           # Patch PJSIP pjmedia_codec.vcxproj para definições x64 e Opus
           Write-Host "Patching pjmedia_codec.vcxproj para PJSIP..."
           $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjmedia/build/pjmedia_codec.vcxproj"
-          # O script patch_microsip_vcxproj.ps1 (e não patch.ps1) está na raiz do repositório principal (sufficit-microsip)
+          
+          # Definir as variáveis de caminho localmente para este run block
+          $pjsipIncludeRoot = "external/pjproject" # Relativo à raiz do MicroSIP
+          $pjsipLibRoot = "external/pjproject/lib" # Relativo à raiz do MicroSIP
+          $pjsipAppsIncludePath = "external/pjproject/pjsip/include" # Caminho relativo à raiz do MicroSIP
+
+          # O script patch_microsip_vcxproj.ps1 está na raiz do repositório principal (sufficit-microsip)
           # Ele aceita PjsipIncludeRoot, PjsipLibRoot e PjsipAppsIncludePath como parâmetros.
           & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
             -ProjFile $pjmedia_codec_vcxproj_path `
-            -PjsipIncludeRoot "external/pjproject" ` # Caminho relativo à raiz do MicroSIP
-            -PjsipLibRoot "external/pjproject/lib" ` # Caminho relativo à raiz do MicroSIP
-            -PjsipAppsIncludePath "external/pjproject/pjsip/include" # Caminho relativo à raiz do MicroSIP
+            -PjsipIncludeRoot $pjsipIncludeRoot ` # Passa a variável localmente definida
+            -PjsipLibRoot $pjsipLibRoot `         # Passa a variável localmente definida
+            -PjsipAppsIncludePath $pjsipAppsIncludePath # Passa a variável localmente definida
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "pjmedia_codec.vcxproj patched."
 
