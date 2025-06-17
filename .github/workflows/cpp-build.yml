@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.54
-# Last Updated: 2025-06-17 01:48:00 PM -03
+# Action Version: 1.0.55
+# Last Updated: 2025-06-17 01:55:00 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -47,8 +47,6 @@ jobs:
           # is being explicitly checked out in a separate step below.
 
       # Step 1.5: Checkout pjproject explicitly
-      # This step ensures pjproject is always in external/pjproject,
-      # independent of whether it's a git submodule in the main repo.
       - name: Checkout pjproject (sufficit/pjproject)
         uses: actions/checkout@v4
         with:
@@ -186,6 +184,14 @@ jobs:
                   exit 1
               }
               
+              # Debug: List contents of the project's temporary output directory
+              # This path needs to be adjusted based on the projectFile structure, as MSBuild output folder is relative to vcxproj.
+              $projectOutputPath = Split-Path -Path $fullProjectPath -Parent | Join-Path -ChildPath "output"
+              # Expected format: C:\a\sufficit-microsip\sufficit-microsip\external\pjproject\pjlib-util\build\output
+              Write-Host "Contents of project output path '$projectOutputPath':"
+              Get-ChildItem -Path $projectOutputPath -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
+              Write-Host "--------------------------------------------------------"
+
               # Determine the expected original library name with suffix (e.g., pjlib-util-x86_64-x64-vc14-Release.lib)
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
@@ -193,8 +199,8 @@ jobs:
               $sourceLibPath = $null
               $foundLibFile = $null
               $maxRetries = 5
-              $retryDelaySec = 2
-
+              $retryDelaySec = 5 # Increased delay between retries
+              
               for ($i = 0; $i -lt $maxRetries; $i++) {
                   Write-Host "Attempting recursive search for '$($originalLibNameWithSuffix)' within 'external/pjproject' (Attempt $($i + 1)/$maxRetries)..."
                   # Search for the .lib file anywhere within the external/pjproject directory
