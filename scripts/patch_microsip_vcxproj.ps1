@@ -19,7 +19,7 @@
 #     A string agora é tratada como literal usando um here-string literal de aspas simples (`@' '@`).
 #   - FIXED: Added `external/pjproject/third_party/lib` to `AdditionalLibraryDirectories`
 #     to resolve `LNK1181: cannot open input file 'libyuv.lib'` error.
-#   - FIXED: Removed trailing comma in `$requiredLibDirs` array to resolve "Missing expression after ','" ParserError.
+#   - FIXED: Removed trailing comma in `$requiredLibDirs` and other arrays to resolve "Missing expression after ','" ParserError.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -190,7 +190,7 @@ try {
         "libsrtp.lib",
         "libwebrtc.lib",
         "libyuv.lib",
-        "libopus.lib", # From our opus download
+        "libopus.lib" # From our opus download
         # Common Windows libs that PJSIP might need for linking
         "ws2_32.lib",
         "advapi32.lib",
