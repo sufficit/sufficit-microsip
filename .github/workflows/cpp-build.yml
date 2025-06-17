@@ -11,7 +11,7 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.41
+# Action Version: 1.0.42
 # Last Updated: 2025-06-17
 # =================================================================================================
 
@@ -41,11 +41,11 @@ jobs:
         with:
           repository: sufficit/sufficit-microsip
           path: . # Checkout to the root of the workspace
+          # FIX: Ensure the token is passed for this primary checkout.
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 1 # Only fetch the latest commit
           # IMPORTANT: Removed 'submodules: false' and explicit submodule handling here.
           # The pjproject repository is explicitly checked out in a separate step below.
-          fetch-depth: 1 # Only fetch the latest commit
-          # Ensure the token is passed for this primary checkout too
-          token: ${{ secrets.GH_PAT }} # Explicitly pass the token here.
 
       # Step 1.5: Checkout pjproject explicitly
       # This step ensures pjproject is always in external/pjproject,
