@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.48
-# Last Updated: 2025-06-17 01:05:25 PM -03
+# Action Version: 1.0.49
+# Last Updated: 2025-06-17 01:12:32 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -183,7 +183,7 @@ jobs:
               }
               
               # Determine the base directory of the .vcxproj file itself
-              $vcxprojDir = Split-Path -Path $fullProjectPath -Parent # e.g., "C:\...\external\pjproject\pjlib\build"
+              $vcxprojDir = Split-Path -Path $fullProjectPath -Parent # e.g., "D:\...\external\pjproject\pjlib\build"
 
               $projectRootComponent = $projectFile.Split('/')[0] # Pega o primeiro segmento do caminho (pjlib, third_party, etc.)
               
@@ -204,7 +204,22 @@ jobs:
               
               # Construct the source library path directly based on the determined outputLibDir
               $sourceLibPath = Join-Path -Path $outputLibDir -ChildPath $originalLibNameWithSuffix
-              $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
+              
+              $foundLibFile = $null
+              $maxRetries = 5
+              $retryDelaySec = 2
+              for ($i = 0; $i -lt $maxRetries; $i++) {
+                  Write-Host "Attempting to find '$($originalLibNameWithSuffix)' at '$($sourceLibPath)' (Attempt $($i + 1)/$maxRetries)..."
+                  $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
+                  if ($null -ne $foundLibFile) {
+                      Write-Host "Found file."
+                      break
+                  }
+                  if ($i -lt ($maxRetries - 1)) {
+                      Write-Host "File not found, retrying in ${retryDelaySec} seconds..."
+                      Start-Sleep -Seconds $retryDelaySec
+                  }
+              }
           
               # Define the central PJSIP lib directory where all renamed libraries should reside
               $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
@@ -279,10 +294,10 @@ jobs:
         with:
           name: microsip-windows-x64-${{ env.BUILD_DATE }}
           path: |
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.exe
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.pdb
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.dll # Ensure this is the correct DLL name
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.lib # Ensure this is the correct LIB name
+            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.exe
+            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.pdb
+            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.dll # Ensure this is the correct DLL name
+            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.lib # Ensure this is the correct LIB name
           retention-days: 7
 
   build-linux:
