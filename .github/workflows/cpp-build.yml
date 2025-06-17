@@ -42,7 +42,7 @@ jobs:
           repository: sufficit/sufficit-microsip
           path: . # Checkout to the root of the workspace
           # FIX: Explicitly pass the token here. This was the recurring error.
-          token: ${{ secrets.GH_PAT }} # <--- CORRECTION APPLIED HERE
+          token: ${{ secrets.GH_PAT }}
           fetch-depth: 1 # Only fetch the latest commit
           # IMPORTANT: Removed 'submodules: recursive' because 'sufficit/pjproject'
           # is being explicitly checked out in a separate step below.
@@ -152,7 +152,7 @@ jobs:
           # Note: Opus is already renamed by download_opus_windows.ps1, so not here.
           $libRenames = @{
               "pjlib-x86_64-x64-vc14-Release.lib" = "pjlib.lib";
-              "pjlib-util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib";
+              "pjlib-util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib"; # CORRECTION APPLIED HERE
               "pjnath-x86_64-x64-vc14-Release.lib" = "pjnath.lib";
               "pjmedia-x86_64-x64-vc14-Release.lib" = "pjmedia.lib";
               "pjmedia-audiodev-x86_64-x64-vc14-Release.lib" = "pjmedia-audiodev.lib";
@@ -239,10 +239,10 @@ jobs:
         shell: pwsh
         run: |
           $pjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
-          Write-Host "Listing contents of ${pjsipLibDir}:" # CORRECTION APPLIED HERE: Added curly braces
+          Write-Host "Listing contents of ${pjsipLibDir}:"
           Get-ChildItem -Path $pjsipLibDir | Format-List FullName, Length, CreationTimeUtc, LastWriteTimeUtc
           if (-not (Test-Path -Path (Join-Path $pjsipLibDir "pjlib-util.lib"))) {
-              Write-Host "##[error]pjlib-util.lib was NOT found in ${pjsipLibDir} after all. This is unexpected." # CORRECTION APPLIED HERE
+              Write-Host "##[error]pjlib-util.lib was NOT found in ${pjsipLibDir} after all. This is unexpected."
               exit 1 # Fail immediately if the specific file isn't found
           }
 
