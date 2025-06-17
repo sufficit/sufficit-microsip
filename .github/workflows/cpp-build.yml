@@ -11,7 +11,7 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.37
+# Action Version: 1.0.38
 # Last Updated: 2025-06-17
 # =================================================================================================
 
@@ -41,8 +41,31 @@ jobs:
         with:
           repository: sufficit/sufficit-microsip
           path: . # Checkout to the root of the workspace
-          submodules: recursive # Ensure submodules are checked out
+          # IMPORTANT: Removed 'submodules: recursive' here because 'sufficit/pjproject'
+          # is being explicitly checked out as a separate step into 'external/pjproject'.
+          # Having both can lead to conflicts or unexpected state.
           fetch-depth: 1 # Only fetch the latest commit
+
+      # Step 1.5: Checkout pjproject explicitly
+      # This step ensures pjproject is always in external/pjproject,
+      # independent of whether it's a git submodule in the main repo.
+      - name: Checkout pjproject (sufficit/pjproject)
+        uses: actions/checkout@v4
+        with:
+          repository: sufficit/pjproject
+          path: external/pjproject # Checkout to the desired subdirectory
+          token: ${{ secrets.GH_PAT }}
+          submodules: false # No submodules within pjproject itself are needed
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: true
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          set-safe-directory: true
 
       # Step 2: Generate build date for artifact naming
       - name: Get Build Date
@@ -250,35 +273,17 @@ jobs:
     runs-on: ubuntu-latest
     # Future implementation for Linux and Linux ARM (disabled for now)
     # needs: build-windows # Depends on Windows build success if common artifacts are needed
-    steps:
+    steps: # Placeholder steps to satisfy GitHub Actions syntax requirements
       - name: Placeholder Linux Build
         run: echo "Linux build job is currently a placeholder."
-    #   - name: Setup Linux Build Environment
-    #     run: echo "Setting up Linux environment..."
-    #   - name: Build on Linux
-    #     run: echo "Building for Linux..."
-    #   - name: Upload Linux Artifacts
-    #     uses: actions/upload-artifact@v4
-    #     with:
-    #       name: linux-build-artifacts
-    #       path: ./build/linux
 
   build-linux-arm:
     runs-on: ubuntu-latest
     # Future implementation for Linux ARM (disabled for now)
     # needs: build-windows
-    steps:
+    steps: # Placeholder steps to satisfy GitHub Actions syntax requirements
       - name: Placeholder Linux ARM Build
         run: echo "Linux ARM build job is currently a placeholder."
-    #   - name: Setup Linux ARM Build Environment
-    #     run: echo "Setting up Linux ARM environment..."
-    #   - name: Build on Linux ARM
-    #     run: echo "Building for Linux ARM..."
-    #   - name: Upload Linux ARM Artifacts
-    #     uses: actions/upload-artifact@v4
-    #     with:
-    #       name: linux-arm-build-artifacts
-    #       path: ./build/linux-arm
 
   create-release:
     name: Create GitHub Release
