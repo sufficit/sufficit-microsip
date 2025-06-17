@@ -11,7 +11,7 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.42
+# Action Version: 1.0.44
 # Last Updated: 2025-06-17
 # =================================================================================================
 
@@ -41,11 +41,11 @@ jobs:
         with:
           repository: sufficit/sufficit-microsip
           path: . # Checkout to the root of the workspace
-          # FIX: Ensure the token is passed for this primary checkout.
+          # FIX: Explicitly pass the token here. This was the recurring error.
           token: ${{ secrets.GH_PAT }}
           fetch-depth: 1 # Only fetch the latest commit
-          # IMPORTANT: Removed 'submodules: false' and explicit submodule handling here.
-          # The pjproject repository is explicitly checked out in a separate step below.
+          # IMPORTANT: Removed 'submodules: recursive' because 'sufficit/pjproject'
+          # is being explicitly checked out in a separate step below.
 
       # Step 1.5: Checkout pjproject explicitly
       # This step ensures pjproject is always in external/pjproject,
@@ -326,6 +326,3 @@ jobs:
           # Add more lines here to include artifacts from other builds (Linux, etc.)
           # if they are enabled and their artifacts are downloaded to 'artifacts/'
           # artifacts/linux-build-artifacts/*
-          # artifacts/linux-arm-build-artifacts/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
