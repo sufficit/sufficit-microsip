@@ -4,13 +4,14 @@
 # This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
 # Changes:
-#   - FIXED: The `patch_microsip_vcxproj.ps1` script now correctly handles MSBuild properties
-#     like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` by enclosing them in
-#     single quotes to prevent PowerShell parsing errors.
-#   - FIXED: This version explicitly *replaces* `AdditionalLibraryDirectories` and `AdditionalDependencies`
+#   - FIXED: Explicitly *replaces* `AdditionalLibraryDirectories` and `AdditionalDependencies`
 #     with precisely controlled absolute paths and libraries. This eliminates potential conflicts
 #     from existing relative paths or implicit default behaviors in the .vcxproj, addressing
 #     persistent LNK1181 errors.
+#   - FIXED: Corrected PowerShell parsing error "The term 'LibraryPath' is not recognized".
+#     MSBuild variables like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` are now
+#     correctly escaped or treated as literal strings within PowerShell, so they are passed
+#     as-is into the XML.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -51,9 +52,10 @@ try {
     if (-not $itemDefinitionGroupNode) {
         Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
         $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
-        $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
-        # Set the Condition attribute to the literal string '$(Configuration)|$(Platform)'=='Release|x64'.
-        $itemDefinitionGroupNode.SetAttribute("Condition", '''$(Configuration)|$(Platform)''==''Release|x64''')
+        $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", <span class="math-inline">nsManager\.LookupNamespace\("msbuild"\)\)
+\# Set the Condition attribute to the literal string '</span>(Configuration)|$(Platform)'=='Release|x64'.
+        # In PowerShell, this is represented by enclosing it in single quotes and doubling any internal single quotes.
+        <span class="math-inline">itemDefinitionGroupNode\.SetAttribute\("Condition", '''</span>(Configuration)|$(Platform)''==''Release|x64''')
         $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 
@@ -85,9 +87,9 @@ try {
         "$pjsipIncludePathForVcxproj_Relative\pjmedia\include",
         "$pjsipAppsIncludePathForVcxproj_Relative", # Points to external/pjproject/pjsip/include
         # Add include for Opus, which is copied to pjlib/include/pj/opus
-        "$pjsipIncludePathForVcxproj_Relative\pjlib\include\pj\opus",
-        # Ensure MSBuild's default include paths are still present but at the end
-        "%(AdditionalIncludeDirectories)" 
+        "<span class="math-inline">pjsipIncludePathForVcxproj\_Relative\\pjlib\\include\\pj\\opus",
+\# Ensure MSBuild's default include paths are still present but at the end
+'</span> (AdditionalIncludeDirectories)' # Escaped for PowerShell, literal in XML
     )
 
     $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
@@ -96,18 +98,18 @@ try {
         $clCompileNode.AppendChild($additionalIncludeDirsNode)
     }
     # Replace content, ensuring unique paths, with MSBuild's placeholder at the end
-    $finalIncludes = ($requiredIncludes | Select-Object -Unique) -join ';'
-    $additionalIncludeDirsNode.'#text' = $finalIncludes
+    # Note: Use -join ';' for string concatenation of array elements
+    $additionalIncludeDirsNode.'#text' = ($requiredIncludes | Select-Object -Unique) -join ';'
     Write-Host "Set AdditionalIncludeDirectories in $ProjFile to: $($additionalIncludeDirsNode.'#text')"
 
 
     # Process AdditionalLibraryDirectories (Replace existing for full control)
     $requiredLibDirs = @(
         $pjsipLibPathForVcxproj_Absolute, # Absolute path to external/pjproject/lib (now centralized by renaming step)
-        $thirdPartyLibPathForVcxproj_Absolute, # Absolute path to external/pjproject/third_party/lib
-        # Ensure MSBuild's default library paths are still present but at the end
-        "$(LibraryPath)",
-        "%(AdditionalLibraryDirectories)"
+        <span class="math-inline">thirdPartyLibPathForVcxproj\_Absolute, \# Absolute path to external/pjproject/third\_party/lib
+\# Ensure MSBuild's default library paths are still present but at the end
+'</span>(LibraryPath)', # Escaped for PowerShell, literal in XML
+        '%(AdditionalLibraryDirectories)' # Escaped for PowerShell, literal in XML
     )
 
     $additionalLibraryDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
@@ -116,8 +118,7 @@ try {
         $linkerNode.AppendChild($additionalLibraryDirsNode)
     }
     # Replace content, ensuring unique paths, with MSBuild's placeholders
-    $finalLibDirs = ($requiredLibDirs | Select-Object -Unique) -join ';'
-    $additionalLibraryDirsNode.'#text' = $finalLibDirs
+    $additionalLibraryDirsNode.'#text' = ($requiredLibDirs | Select-Object -Unique) -join ';'
     Write-Host "Set AdditionalLibraryDirectories in $ProjFile to: $($additionalLibraryDirsNode.'#text')"
 
 
@@ -167,8 +168,10 @@ try {
         $linkerNode.AppendChild($additionalDependenciesNode)
     }
     # Replace content, ensuring unique libs, with MSBuild's placeholder
-    $finalDependencies = ($pjsipLibs + $windowsCommonLibs | Select-Object -Unique) -join ';'
-    $additionalDependenciesNode.'#text' = "$finalDependencies;%(AdditionalDependencies)"
+    # Note: Using Select-Object -Unique here to deduplicate combined lists.
+    $finalDependenciesList = ($pjsipLibs + $windowsCommonLibs | Select-Object -Unique)
+    # Append the MSBuild placeholder literally
+    $additionalDependenciesNode.'#text' = ($finalDependenciesList -join ';') + ';%(AdditionalDependencies)'
     Write-Host "Set AdditionalDependencies in $ProjFile to: $($additionalDependenciesNode.'#text')"
 
     $projXml.Save($ProjFile)
