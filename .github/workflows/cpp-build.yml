@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.59
-# Last Updated: 2025-06-17 05:38:00 PM -03 (Increased retry attempts and delay for lib files)
+# Action Version: 1.0.60
+# Last Updated: 2025-06-17 06:00:00 PM -03 (Implemented dynamic .lib path extraction from MSBuild logs)
 # =================================================================================================
 
 name: C++ Build
@@ -178,9 +178,10 @@ jobs:
               Write-Host "Compiling project: $fullProjectPath"
               
               # Execute MSBuild and capture output line by line (no Out-String to preserve line integrity for regex)
+              # Capture raw output to parse for actual .lib path
               $rawMsbuildOutput = & msbuild.exe "$fullProjectPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true /nologo
-              Write-Host ($rawMsbuildOutput | Out-String) # Still output for debugging, but process raw lines for extraction
-              
+              Write-Host ($rawMsbuildOutput | Out-String) # Still output for debugging
+
               if ($LASTEXITCODE -ne 0) {
                   Write-Host "##[error]PJSIP project compilation failed for $projectFile."
                   exit 1
@@ -190,38 +191,48 @@ jobs:
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
 
-              # Debug: Inspect intermediate variables
-              $projectBuildDir = Split-Path -Path $fullProjectPath -Parent
-              Write-Host "DEBUG: projectFile = $projectFile"
-              Write-Host "DEBUG: fullProjectPath = $fullProjectPath"
-              Write-Host "DEBUG: projectBuildDir = $projectBuildDir"
-              Write-Host "DEBUG: libNameWithoutSuffix = $libNameWithoutSuffix"
-              Write-Host "DEBUG: originalLibNameWithSuffix = $originalLibNameWithSuffix"
+              # NEW LOGIC: Extract the actual output .lib path from MSBuild output
+              # Look for lines like "pjlib.vcxproj -> C:\a\...\pjlib-x86_64-x64-vc14-Release.lib"
+              $actualOutputLibPath = $null
+              foreach ($line in $rawMsbuildOutput) {
+                  if ($line -match "(?i)\.vcxproj -> (.*\.lib)") {
+                      $match = $matches[1]
+                      # Clean up any trailing whitespace or carriage returns
+                      $actualOutputLibPath = $match.Trim()
+                      Write-Host "DEBUG: Extracted actual output .lib path: $actualOutputLibPath"
+                      break
+                  }
+              }
 
-              # Corrected path construction: MSBuild outputs to ..\lib\ relative to the .vcxproj
-              $tempSourceLibPath = Join-Path -Path $projectBuildDir -ChildPath "..\lib\$originalLibNameWithSuffix" # FIXED: Corrected path to output .lib
-
-              Write-Host "Contents of project output path for '$originalLibNameWithSuffix':"
-              Get-ChildItem -Path (Split-Path -Path $tempSourceLibPath -Parent) -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
+              if ($null -eq $actualOutputLibPath) {
+                  Write-Host "##[error]Error: Could not determine actual output .lib path from MSBuild log for $projectFile. Failing workflow."
+                  exit 1
+              }
+              
+              # We no longer need to construct $tempSourceLibPath based on assumptions.
+              # Use $actualOutputLibPath directly as the source.
+              $sourceLibPath = $actualOutputLibPath
+              
+              Write-Host "Contents of source directory of '$originalLibNameWithSuffix':"
+              Get-ChildItem -Path (Split-Path -Path $sourceLibPath -Parent) -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
               Write-Host "--------------------------------------------------------"
 
-              $sourceLibPath = $null
               $foundLibFile = $null
-              $maxRetries = 10 # Increased from 5
-              $retryDelaySec = 10 # Increased from 5
-              
-              # Wait for the .lib file to appear in the intermediate output directory
+              $maxRetries = 5 # Retries can be back to a lower number since path is exact
+              $retryDelaySec = 2 # Shorter delay since path is exact
+
+              # Wait for the .lib file to exist at the *exact* path reported by MSBuild
               for ($i = 0; $i -lt $maxRetries; $i++) {
-                  Write-Host "Attempting to find freshly compiled intermediate library '$($originalLibNameWithSuffix)' at '$($tempSourceLibPath)' (Attempt $($i + 1)/$maxRetries)..."
-                  if (Test-Path -Path $tempSourceLibPath -PathType Leaf -ErrorAction SilentlyContinue) {
-                      $foundLibFile = Get-Item -Path $tempSourceLibPath -ErrorAction SilentlyContinue
+                  Write-Host "Attempting to find freshly compiled library '$($originalLibNameWithSuffix)' at '$($sourceLibPath)' (Attempt $($i + 1)/$maxRetries)..."
+                  if (Test-Path -Path $sourceLibPath -PathType Leaf -ErrorAction SilentlyContinue) {
+                      $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
                       if ($null -ne $foundLibFile) {
-                          Write-Host "Found intermediate file."
+                          Write-Host "Found compiled file at exact path."
                           break
                       }
                   }
                   if ($i -lt ($maxRetries - 1)) {
-                      Write-Host "Intermediate file not found, retrying in ${retryDelaySec} seconds..."
+                      Write-Host "File not found at exact path, retrying in ${retryDelaySec} seconds..."
                       Start-Sleep -Seconds $retryDelaySec
                   }
               }
@@ -236,22 +247,22 @@ jobs:
                   $targetLibPath = Join-Path -Path $centralPjsipLibDir -ChildPath $targetLibName
               
                   if ($null -ne $foundLibFile) {
-                      Write-Host "Found '$($originalLibNameWithSuffix)' at '$($foundLibFile.FullName)'. Renaming to '$($targetLibName)' and moving to '$($centralPjsipLibDir)'."
-                      # Perform the move operation from the intermediate output directory
+                      Write-Host "Found '$($foundLibFile.Name)' at '$($foundLibFile.FullName)'. Renaming to '$($targetLibName)' and moving to '$($centralPjsipLibDir)'."
                       Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
                   } else {
-                      Write-Host "##[error]Error: Original library file '$($originalLibNameWithSuffix)' not found after compilation! Check PJSIP build logs and file system for its actual location. Failing workflow."
+                      Write-Host "##[error]Error: Compiled library file '$($originalLibNameWithSuffix)' was reported by MSBuild but not found at '$($sourceLibPath)' after all retries. Failing workflow."
                       exit 1 # Fail the workflow if a critical library is not found for renaming
                   }
               } else {
-                  Write-Host "##[warning]Warning: No rename mapping found for '$($originalLibNameWithSuffix)'. Leaving as is."
+                  Write-Host "##[warning]Warning: No specific rename mapping found for '$($originalLibNameWithSuffix)'. Moving it as is."
                   # If no rename mapping, still try to move the intermediate .lib to the central lib directory
-                  # This covers cases like "pjlib-util-x86_64-x64-vc14-Release.lib" which don't have a simple rename,
-                  # but should still end up in the central lib folder.
                   if ($null -ne $foundLibFile) {
                       $targetNoRenamePath = Join-Path -Path $centralPjsipLibDir -ChildPath $originalLibNameWithSuffix
-                      Write-Host "Moving unrenamed '$($originalLibNameWithSuffix)' from '$($foundLibFile.FullName)' to '$($centralPjsipLibDir)'."
+                      Write-Host "Moving unrenamed '$($foundLibFile.Name)' from '$($foundLibFile.FullName)' to '$($centralPjsipLibDir)'."
                       Move-Item -Path $foundLibFile.FullName -Destination $targetNoRenamePath -Force
+                  } else {
+                      Write-Host "##[error]Error: Compiled library file '$($originalLibNameWithSuffix)' was reported by MSBuild but not found at '$($sourceLibPath)' for direct move. Failing workflow."
+                      exit 1
                   }
               }
           }

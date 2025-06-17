@@ -17,10 +17,9 @@ The automation relies on two main PowerShell scripts:
 
 ## Key Challenges and Solutions (Gemini AI Collaboration History)
 
-The development of these scripts has involved addressing several persistent and subtle issues, primarily related to path resolution, dependency management, and PowerShell's strict parsing rules within the GitHub Actions environment.
+The development of these scripts has involved addressing several persistent and sutis issues, primarily related to path resolution, dependency management, and PowerShell's strict parsing rules within the GitHub Actions environment.
 
 ### 1. `download_opus_windows.ps1`
-
 * **Initial Problem:** Difficulty authenticating to GitHub Releases to download the Opus artifact, often resulting in "Unauthorized" errors or PowerShell parameter binding failures (e.g., "A parameter cannot be found that matches parameter name 'GitHubToken'." or "'param' is not recognized").
 * **Solution:**
     * The `param` block was **removed** from the script.
@@ -32,7 +31,6 @@ The development of these scripts has involved addressing several persistent and 
     * Temporary directories are cleaned up after successful processing.
 
 ### 2. `config_site_content.h` and `pjsip_extra_defines_content.h`
-
 * **Problem:** Missing header files (`config_site.h`, `pjsip_extra_defines.h`) leading to "Cannot find path" errors during PJSIP compilation, as they were not checked out with the main `pjproject` submodule.
 * **Solution:**
     * These files are now stored directly in the main repository under the `scripts/` directory (`scripts/config_site_content.h`, `scripts/pjsip_extra_defines_content.h`).
@@ -40,7 +38,6 @@ The development of these scripts has involved addressing several persistent and 
     * `config_site_content.h` includes `#ifndef` guards for common Windows macros (`_WIN32_WINNT`, `_WIN32`, `_M_X64`) to prevent "macro redefinition" warnings (C4005) with Visual Studio 2022.
 
 ### 3. `patch_microsip_vcxproj.ps1`
-
 This script has been the source of the most challenging debugging due to interactions between PowerShell, XML manipulation, and MSBuild variables.
 
 * **Problem 1:** Initial `LNK1181: cannot open input file` errors (e.g., `pjlib.lib`, `pjlib-util.lib`).
@@ -77,8 +74,10 @@ This script has been the source of the most challenging debugging due to interac
 3.  **Workflow (`cpp-build.yml`):**
     * The workflow orchestrates the steps: checking out code, preparing build dates, setting up MSBuild, preparing/compiling PJSIP, patching MicroSIP's `.vcxproj`, compiling MicroSIP, and uploading artifacts.
     * **Debug Step (`List PJSIP Lib Directory Contents`):** A diagnostic step has been added before the final MicroSIP compilation to list the contents of the `external/pjproject/lib` directory. This is crucial for verifying that the compiled and renamed PJSIP `.lib` files are indeed present and correctly named if linker errors persist.
-    * **Action Version:** * `1.0.58`
-        * **Last Updated:** `2025-06-17 05:30:00 PM -03` (Updated for GH_PAT and PJSIP lib path)
+    * **Example Versioning Information:**
+        * **Version**: `X.Y.Z`
+        * **Last Updated**: `YYYY-MM-DD HH:MM:SS TZ`
+        * **Description**: A brief, single-line summary of the changes in this workflow version.
 
 4.  **Future Expansion:**
     * Placeholder jobs for `build-linux` and `build-linux-arm` are included but commented out. These can be enabled and configured once the Windows build is fully stable and requirements for other platforms are defined.
