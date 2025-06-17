@@ -239,10 +239,10 @@ jobs:
         shell: pwsh
         run: |
           $pjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
-          Write-Host "Listing contents of $pjsipLibDir:"
+          Write-Host "Listing contents of ${pjsipLibDir}:" # CORRECTION APPLIED HERE: Added curly braces
           Get-ChildItem -Path $pjsipLibDir | Format-List FullName, Length, CreationTimeUtc, LastWriteTimeUtc
           if (-not (Test-Path -Path (Join-Path $pjsipLibDir "pjlib-util.lib"))) {
-              Write-Host "##[error]pjlib-util.lib was NOT found in $pjsipLibDir after all. This is unexpected."
+              Write-Host "##[error]pjlib-util.lib was NOT found in ${pjsipLibDir} after all. This is unexpected." # CORRECTION APPLIED HERE
               exit 1 # Fail immediately if the specific file isn't found
           }
 
