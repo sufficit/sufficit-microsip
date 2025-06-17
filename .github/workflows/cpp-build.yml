@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.56
-# Last Updated: 2025-06-17 01:59:00 PM -03
+# Action Version: 1.0.57
+# Last Updated: 2025-06-17 06:04:37 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -28,7 +28,7 @@ on:
 env:
   # Define the GH_PAT variable for PowerShell script authentication
   # This variable must be configured as a secret in the repository.
-  GH_PAT: ${{ secrets.GH_PAT }}
+  GH_PAT: ${{ secrets.GH_PAT }}_
 
 jobs:
   build-windows:
@@ -186,10 +186,21 @@ jobs:
                   exit 1
               }
               
-              # Debug: List contents of the project's temporary output directory
-              # This path needs to be adjusted based on the projectFile structure, as MSBuild output folder is relative to vcxproj.
+              # Determine the expected original library name with suffix (e.g., pjlib-util-x86_64-x64-vc14-Release.lib)
+              $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
+              $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
+
+              # Debug: Inspect intermediate variables
               $projectBuildDir = Split-Path -Path $fullProjectPath -Parent
-              $expectedIntermediateLibDir = Join-Path -Path $projectBuildDir -ChildPath "output\$libNameWithoutSuffix-x86_64-x64-vc14-Release" # Corrected path: it's a directory, not a file at this stage
+              Write-Host "DEBUG: projectFile = $projectFile"
+              Write-Host "DEBUG: fullProjectPath = $fullProjectPath"
+              Write-Host "DEBUG: projectBuildDir = $projectBuildDir"
+              Write-Host "DEBUG: libNameWithoutSuffix = $libNameWithoutSuffix"
+              Write-Host "DEBUG: originalLibNameWithSuffix = $originalLibNameWithSuffix"
+
+              # Corrected path construction for the actual intermediate output directory used by MSBuild
+              # It's usually 'output\<ProjectName>-<Architecture>-<Configuration>'
+              $expectedIntermediateLibDir = Join-Path -Path $projectBuildDir -ChildPath "output\$libNameWithoutSuffix-x86_64-x64-vc14-Release"
               
               # Construct the full path to the freshly compiled .lib file in the intermediate output directory
               $tempSourceLibPath = Join-Path -Path $expectedIntermediateLibDir -ChildPath $originalLibNameWithSuffix
@@ -197,10 +208,6 @@ jobs:
               Write-Host "Contents of project output path '$expectedIntermediateLibDir':"
               Get-ChildItem -Path $expectedIntermediateLibDir -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
               Write-Host "--------------------------------------------------------"
-
-              # Determine the expected original library name with suffix (e.g., pjlib-util-x86_64-x64-vc14-Release.lib)
-              $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
-              $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
 
               $sourceLibPath = $null
               $foundLibFile = $null
