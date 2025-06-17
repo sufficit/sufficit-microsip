@@ -11,9 +11,11 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.35
+# Action Version: 1.0.36
 # Last Updated: 2025-06-17
 # Description of Changes:
+#   - FIXED: Corrected the format string for `BUILD_DATE` using `fromiso8601` to parse the timestamp,
+#     resolving the "The format specifiers 'yyyyMMdd-HHmmss' are not valid for objects of type 'String'" error.
 #   - FIXED: The `patch_microsip_vcxproj.ps1` script now correctly handles MSBuild properties
 #     like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` by enclosing them in
 #     single quotes to prevent PowerShell parsing errors.
@@ -32,7 +34,8 @@ on:
       - 'v*.*.*' # Trigger on version tags like v1.0.0
 
 env:
-  BUILD_DATE: ${{ format('{0:yyyyMMdd-HHmmss}', github.event.head_commit.timestamp) }}
+  # Correct way to format the timestamp from head_commit.timestamp
+  BUILD_DATE: ${{ format('{0:yyyyMMdd-HHmmss}', fromiso8601(github.event.head_commit.timestamp)) }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Automatically provided by GitHub Actions
   GH_PAT: ${{ secrets.GH_PAT }} # For accessing private repositories/releases if needed
 
