@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.50
-# Last Updated: 2025-06-17 01:20:00 PM -03
+# Action Version: 1.0.51
+# Last Updated: 2025-06-17 01:25:52 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -187,7 +187,7 @@ jobs:
               }
               
               # Extract the exact output .lib path from MSBuild output
-              # Look for lines like "pjlib.vcxproj -> C:\path\to\lib\pjlib-x86_64-x64-vc14-Release.lib"
+              # Look for lines like "project.vcxproj -> C:\path\to\lib\project-x86_64-x64-vc14-Release.lib"
               $originalLibFullName = ($msbuildOutput | Select-String -Pattern "(\.vcxproj -> .*?\.lib)" | ForEach-Object { 
                   $_.Matches[0].Value -replace ".*->\s*", "" -replace "`r`n", ""
               })
@@ -205,7 +205,7 @@ jobs:
               $retryDelaySec = 2
               for ($i = 0; $i -lt $maxRetries; $i++) {
                   Write-Host "Attempting to find '$($originalLibNameWithSuffix)' at '$($sourceLibPath)' (Attempt $($i + 1)/$maxRetries)..."
-                  if ($sourceLibPath -and (Test-Path -Path $sourceLibPath -LiteralPath)) { # Use -LiteralPath for exact match
+                  if ($sourceLibPath -and (Test-Path -Path $sourceLibPath)) { # Removed -LiteralPath which expects an argument
                       $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
                       if ($null -ne $foundLibFile) {
                           Write-Host "Found file."
