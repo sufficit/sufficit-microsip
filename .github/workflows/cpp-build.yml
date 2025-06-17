@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.64
-# Last Updated: 2025-06-17 07:05:00 PM -03 (Corrected underscore/hyphen mismatch in $libRenames for pjlib_util and others)
+# Action Version: 1.0.65
+# Last Updated: 2025-06-17 07:13:43 PM -03 (Final fix for underscore/hyphen mismatch in matching $libRenames keys)
 # =================================================================================================
 
 name: C++ Build
@@ -138,21 +138,22 @@ jobs:
               "third_party/build/yuv/libyuv.vcxproj"
           )
           
-          # Mapping of original PJSIP output names to desired simple names
-          # CORRECTED: Changed pjlib-util and pjsua* from hyphen to underscore to match MSBuild output
+          # Mapping of original PJSIP output names (with suffix) to desired simple names
+          # NOTE: The keys here MUST match the EXACT file names output by MSBuild for these projects,
+          # including any underscores or hyphens that MSBuild adds.
           $libRenames = @{
               "pjlib-x86_64-x64-vc14-Release.lib" = "pjlib.lib";
-              "pjlib_util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib"; # CORRECTED
+              "pjlib-util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib";
               "pjnath-x86_64-x64-vc14-Release.lib" = "pjnath.lib";
               "pjmedia-x86_64-x64-vc14-Release.lib" = "pjmedia.lib";
               "pjmedia-audiodev-x86_64-x64-vc14-Release.lib" = "pjmedia-audiodev.lib";
               "pjmedia-codec-x86_64-x64-vc14-Release.lib" = "pjmedia-codec.lib";
               "pjmedia-videodev-x86_64-x64-vc14-Release.lib" = "pjmedia-videodev.lib";
-              "pjsip_core-x86_64-x64-vc14-Release.lib" = "pjsip-core.lib"; # CORRECTED
-              "pjsip_simple-x86_64-x64-vc14-Release.lib" = "pjsip-simple.lib"; # CORRECTED
-              "pjsip_ua-x86_64-x64-vc14-Release.lib" = "pjsip-ua.lib"; # CORRECTED
-              "pjsua_lib-x86_64-x64-vc14-Release.lib" = "pjsua-lib.lib"; # CORRECTED (Crucial for pjsua.h)
-              "pjsua2_lib-x86_64-x64-vc14-Release.lib" = "pjsua2-lib.lib"; # CORRECTED
+              "pjsip-core-x86_64-x64-vc14-Release.lib" = "pjsip-core.lib";
+              "pjsip-simple-x86_64-x64-vc14-Release.lib" = "pjsip-simple.lib";
+              "pjsip-ua-x86_64-x64-vc14-Release.lib" = "pjsip-ua.lib";
+              "pjsua-lib-x86_64-x64-vc14-Release.lib" = "pjsua-lib.lib";
+              "pjsua2-lib-x86_64-x64-vc14-Release.lib" = "pjsua2-lib.lib";
               "libbaseclasses-x86_64-x64-vc14-Release.lib" = "libbaseclasses.lib";
               "libg7221codec-x86_64-x64-vc14-Release.lib" = "libg7221codec.lib";
               "libgsmcodec-x86_64-x64-vc14-Release.lib" = "libgsmcodec.lib";
@@ -177,12 +178,6 @@ jobs:
                   exit 1
               }
               
-              # Determine the expected original library name with suffix
-              # This uses the project file name to determine the expected output name from MSBuild
-              $baseProjectName = [System.IO.Path]::GetFileNameWithoutExtension($projectFile)
-              # The logic to determine the original name needs to account for differences like underscore/hyphen in actual output
-              # Let's rebuild the originalLibNameWithSuffix more robustly from the extracted path
-              
               $actualOutputLibPath = $null
               foreach ($line in $rawMsbuildOutput) {
                   if ($line -match "(?i)\.vcxproj -> (.*\.lib)") {
@@ -199,8 +194,12 @@ jobs:
               }
               
               $sourceLibPath = $actualOutputLibPath
-              $originalLibNameWithSuffix = [System.IO.Path]::GetFileName($sourceLibPath) # Use the actual file name from extraction as the key for $libRenames
+              $originalLibNameWithSuffix = [System.IO.Path]::GetFileName($sourceLibPath) # This gets the *exact* file name as output by MSBuild
               
+              # Normalize the extracted name (convert underscores to hyphens) to match keys in $libRenames
+              # This is the CRUCIAL change
+              $normalizedOriginalLibName = $originalLibNameWithSuffix.Replace('_', '-')
+
               Write-Host "Contents of source directory of '$originalLibNameWithSuffix':"
               Get-ChildItem -Path (Split-Path -Path $sourceLibPath -Parent) -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
               Write-Host "--------------------------------------------------------"
@@ -229,14 +228,12 @@ jobs:
               $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
               New-Item -ItemType Directory -Path $centralPjsipLibDir -Force | Out-Null
           
-              # FIX: Always get the target library name from $libRenames for consistency
-              # If $originalLibNameWithSuffix (the actual name from MSBuild) is a key in $libRenames, use its mapped value.
-              # Otherwise, use its original name.
               $targetLibName = $null
-              if ($libRenames.ContainsKey($originalLibNameWithSuffix)) {
-                  $targetLibName = $libRenames[$originalLibNameWithSuffix]
-                  Write-Host "DEBUG: Found rename mapping for '$($originalLibNameWithSuffix)'. Target name: '$targetLibName'."
+              if ($libRenames.ContainsKey($normalizedOriginalLibName)) { # Use the normalized name to check against the map
+                  $targetLibName = $libRenames[$normalizedOriginalLibName]
+                  Write-Host "DEBUG: Found rename mapping for '$($normalizedOriginalLibName)'. Target name: '$targetLibName'."
               } else {
+                  # If no explicit rename mapping, use the original (un-normalized) name as the target name.
                   $targetLibName = $originalLibNameWithSuffix
                   Write-Host "##[warning]Warning: No specific rename mapping found for '$($originalLibNameWithSuffix)'. Using its original name as the target name: '$targetLibName'."
               }
@@ -300,10 +297,10 @@ jobs:
         with:
           name: microsip-windows-x64-${{ env.BUILD_DATE }}
           path: |
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.exe
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.pdb
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.dll # Ensure this is the correct DLL name
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.lib # Ensure this is the correct LIB name
+            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.exe
+            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.pdb
+            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.dll # Ensure this is the correct DLL name
+            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.lib # Ensure this is the correct LIB name
           retention-days: 7
 
   build-linux:
