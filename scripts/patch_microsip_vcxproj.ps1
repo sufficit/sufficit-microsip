@@ -19,6 +19,7 @@
 #     A string agora é tratada como literal usando um here-string literal de aspas simples (`@' '@`).
 #   - FIXED: Added `external/pjproject/third_party/lib` to `AdditionalLibraryDirectories`
 #     to resolve `LNK1181: cannot open input file 'libyuv.lib'` error.
+#   - FIXED: Removed trailing comma in `$requiredLibDirs` array to resolve "Missing expression after ','" ParserError.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
