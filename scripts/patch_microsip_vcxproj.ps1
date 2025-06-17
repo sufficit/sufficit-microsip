@@ -53,10 +53,12 @@ try {
         Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
         $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
         $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
-        # Corrected: Use a single-quoted here-string. The closing marker must be on its own line.
-        $itemDefinitionGroupNode.SetAttribute("Condition", @'
-<span class="math-inline">\(Configuration\)\|</span>(Platform)'=='Release|x64'
-'@')
+        # Corrected: Use a single-quoted here-string variable for the attribute value.
+        # The closing marker for a here-string must be on its own line.
+        $conditionValue = @'
+$(Configuration)|$(Platform)'=='Release|x64'
+'@
+        $itemDefinitionGroupNode.SetAttribute("Condition", $conditionValue)
         $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 
@@ -107,9 +109,9 @@ try {
     # Process AdditionalLibraryDirectories (Replace existing for full control)
     $requiredLibDirs = @(
         $pjsipLibPathForVcxproj_Absolute, # Absolute path to external/pjproject/lib (now centralized by renaming step)
-        <span class="math-inline">thirdPartyLibPathForVcxproj\_Absolute, \# Absolute path to external/pjproject/third\_party/lib
-\# Ensure MSBuild's default library paths are still present but at the end
-'</span>(LibraryPath)', # Corrected: Treated as literal string by PowerShell
+        $thirdPartyLibPathForVcxproj_Absolute, # Absolute path to external/pjproject/third_party/lib
+        # Ensure MSBuild's default library paths are still present but at the end
+        '$(LibraryPath)', # Corrected: Treated as literal string by PowerShell
         '%(AdditionalLibraryDirectories)' # Corrected: Treated as literal string by PowerShell
     )
 
