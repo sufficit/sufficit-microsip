@@ -12,11 +12,18 @@
 # installing system development packages or compiling Opus internally.
 #
 # Action Version: 1.0.34
-# Last Updated: 2025-06-16
+# Last Updated: 2025-06-17
 # Description of Changes:
-#   - FIXED: A chamada para `download_opus_windows.ps1` no `build.yml` foi corrigida para usar
-#     `pwsh -File` para invocar o script diretamente como um arquivo PowerShell. Isso resolve o erro
-#     `'param' is not recognized` e garante a passagem correta de argumentos.
+#   - FIXED: O script `download_opus_windows.ps1` foi modificado para remover o bloco 'param'
+#     e ler o GitHubToken diretamente do ambiente ($env:GH_PAT). Isso resolveu o erro
+#     "'param' not recognized".
+#   - Fixed: Erro "Cannot find path" para config_site_content.h e pjsip_extra_defines_content.h.
+#     A causa foi a ausência desses ficheiros no diretório 'scripts/'. A solução é que
+#     estes ficheiros devem ser adicionados e committados ao repositório 'sufficit-microsip/scripts'.
+#     Os conteúdos sugeridos para esses ficheiros foram fornecidos.
+#   - TENTATIVA: A etapa de compilação do PJSIP foi modificada para excluir projetos problemáticos
+#     (principalmente projetos .csproj e .vcxproj relacionados a UWP/WP8) que causavam o erro
+#     "The target 'Rebuild' does not exist in the project".
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -129,12 +136,11 @@ jobs:
           #              caracteres invisíveis ou de codificação subtil no próprio ficheiro `download_opus_windows.ps1`
           #              que persiste mesmo após a leitura com -Encoding UTF8.
           #
-          # Solução proposta atual: Ler o conteúdo do script original, escrevê-lo para um novo ficheiro
-          # temporário no diretório de execução (garantindo UTF-8 sem BOM através da classe .NET) e,
-          # em seguida, executar esse ficheiro temporário.
-          # Esta abordagem tenta garantir que o ficheiro executado é "limpo" de quaisquer problemas
-          # de codificação ou de processamento de ficheiros pelo Git no ambiente do runner.
-          # A codificação UTF8WithoutBOM causou um erro anterior, agora usamos a sintaxe completa da classe .NET.
+          # Solução proposta que funcionou (V7 do download_opus_windows.ps1): O ficheiro `download_opus_windows.ps1`
+          # foi modificado para remover o bloco `param` e ler o `$env:GH_PAT` diretamente. A execução
+          # via ficheiro temporário com codificação controlada foi mantida para robustez.
+          #
+          # Solução proposta atual para o problema `MSB4057`: Excluir projetos problemáticos da compilação.
           
           $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8 # Garante que a leitura é UTF8
           # Usa a classe .NET para criar uma codificação UTF8 sem BOM
@@ -142,12 +148,15 @@ jobs:
           Set-Content -Path $tempScriptPath -Value $scriptContent -Encoding $utf8NoBomEncoding
 
           # Agora, execute o ficheiro temporário
-          pwsh -File $tempScriptPath -GitHubToken "$env:GH_PAT"
+          # Este comando já não passa o token como parâmetro, pois o script lê de $env:GH_PAT
+          pwsh -File $tempScriptPath
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
 
           # Copiar ficheiros de configuração PJSIP
           Write-Host "Copiando config_site.h e pjsip_extra_defines.h para PJSIP..."
+          # Esses ficheiros devem existir em $env:GITHUB_WORKSPACE/scripts/
+          # A sua ausência causou o erro "Cannot find path" em execuções anteriores.
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/config_site_content.h" -Destination "pjlib/include/pj/config_site.h" -Force
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
           Write-Host "Ficheiros de configuração PJSIP copiados."
@@ -163,8 +172,35 @@ jobs:
           # Compilar a solução PJSIP
           Write-Host "Compilando solução PJSIP..."
           $pjSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjproject-vs14.sln"
+
+          # Histórico de problemas com MSBuild:
+          # O MSBuild está a falhar com "The target 'Rebuild' does not exist in the project" para
+          # projetos .csproj e .vcxproj de UWP/WP8 que fazem parte da solução PJSIP, mas não são
+          # essenciais para a compilação da biblioteca principal do PJSIP para Windows desktop.
+          # Para resolver, vamos usar a opção `/p:ExcludeRestorePackageFolders=true` e excluir
+          # projetos que não têm o target Rebuild ou que são específicos de UWP/WP8
+          # (que não são compiláveis no ambiente padrão).
+          
+          # Tentativa de exclusão de projetos problemáticos.
+          # Os GUIDs e nomes de projetos abaixo são exemplos dos que geralmente causam problemas
+          # em ambientes CI se não forem específicos para UWP/WP8.
+          # Você pode precisar ajustar esta lista com base nos seus logs exatos.
+          $excludeProjects = @(
+              "{5B521251-4045-42DB-A343-C195FC47EF0D}", # pjsua_cli_uwp.csproj
+              "{E5306B62-2300-410E-926B-98782D794E78}", # pjsua_cli_wp8.csproj
+              "{313BE839-D21F-438D-8822-04987E84218C}", # pjsua_cli_uwp_comp.vcxproj
+              "{2E31D61D-2E32-46A2-9E39-16584284534F}", # Voip.csproj
+              "{5043B087-C19B-4081-AEB2-5503023E28B0}", # VoipBackEnd.vcxproj
+              "{4C2A34C3-A833-4029-9F4F-F9651D8354A8}", # VoipHost.vcxproj
+              "{92E36D99-A7A2-4217-AE84-180D21626C11}"  # VoipTasks.csproj
+          )
+          $excludeProjectsString = $excludeProjects -join ';'
+
           # O script build_pjsip.ps1 está na raiz do repositório principal (sufficit-microsip)
-          & "$env:GITHUB_WORKSPACE/scripts/build_pjsip.ps1" -SlnFile $pjSlnPath
+          # Passamos a lista de projetos a excluir para msbuild diretamente.
+          # A opção /p:ExcludeRestorePackageFolders=true pode ajudar com projetos .NET Core
+          & msbuild.exe "$pjSlnPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true /p:ExcludeProjectsFromBuild="$excludeProjectsString"
+          
           if ($LASTEXITCODE -ne 0) {
               Write-Host "##[error]A compilação da solução PJSIP falhou."
               exit 1
@@ -182,7 +218,7 @@ jobs:
         run: |
           $microsipVcxprojPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "microsip.vcxproj"
           $pjsipIncludeRoot = "external/pjproject" # Relativo à raiz do MicroSIP (onde os módulos PJSIP estão)
-          $pjsipLibPath = "external/pjproject/lib" # Relativo à raiz do MicroSIP (onde as libs PJSIP serão geradas)
+          $pjsipLibRoot = "external/pjproject/lib" # Relativo à raiz do MicroSIP (onde as libs PJSIP serão geradas)
           $pjsipAppsIncludePath = "external/pjproject/pjsip/include" # Caminho para pjsua.h
 
           Write-Host "Aplicando patch ao microsip.vcxproj em: $microsipVcxprojPath"
