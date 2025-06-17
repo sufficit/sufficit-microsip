@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.53
-# Last Updated: 2025-06-17 01:39:57 PM -03
+# Action Version: 1.0.54
+# Last Updated: 2025-06-17 01:48:00 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -186,46 +186,29 @@ jobs:
                   exit 1
               }
               
-              # Extract the exact output .lib path from MSBuild output
-              # Look for lines like "project.vcxproj -> C:\path\to\lib\project-x86_64-x64-vc14-Release.lib"
-              # Use Select-Object -First 1 to get only the first match, in case of multiple similar lines
-              $originalLibFullName = ($rawMsbuildOutput | Where-Object { $_ -match "\.vcxproj -> .*?\.lib$" } | ForEach-Object {
-                  ($_ -replace ".*->\s*", "" -replace "`r`n", "").Trim()
-              } | Select-Object -First 1)
-              
+              # Determine the expected original library name with suffix (e.g., pjlib-util-x86_64-x64-vc14-Release.lib)
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
 
               $sourceLibPath = $null
-              # Ensure that we actually extracted a path and it ends with the expected library name
-              if ($originalLibFullName -and $originalLibFullName.EndsWith($originalLibNameWithSuffix)) {
-                  $sourceLibPath = $originalLibFullName
-              } else {
-                  # Fallback/Debug: If extraction by regex fails, try to guess the path based on component structure
-                  Write-Warning "Could not reliably extract exact lib path from MSBuild output for '$projectFile'. Attempting fallback path construction."
-                  $projectRootComponent = $projectFile.Split('/')[0]
-                  if ($projectRootComponent -eq "third_party") {
-                      $sourceLibPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/third_party/lib/$originalLibNameWithSuffix"
-                  } else {
-                      $sourceLibPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectRootComponent/lib/$originalLibNameWithSuffix"
-                  }
-                  Write-Warning "Fallback path constructed: $sourceLibPath"
-              }
-              
               $foundLibFile = $null
               $maxRetries = 5
               $retryDelaySec = 2
+
               for ($i = 0; $i -lt $maxRetries; $i++) {
-                  Write-Host "Attempting to find '$($originalLibNameWithSuffix)' at '$($sourceLibPath)' (Attempt $($i + 1)/$maxRetries)..."
-                  if ($sourceLibPath -and (Test-Path -Path $sourceLibPath)) { # Removed -LiteralPath which expects an argument
-                      $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
-                      if ($null -ne $foundLibFile) {
-                          Write-Host "Found file."
-                          break
-                      }
+                  Write-Host "Attempting recursive search for '$($originalLibNameWithSuffix)' within 'external/pjproject' (Attempt $($i + 1)/$maxRetries)..."
+                  # Search for the .lib file anywhere within the external/pjproject directory
+                  $possibleLibFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE/external/pjproject -Recurse -File -Filter "*.lib" -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $originalLibNameWithSuffix }
+                  
+                  if ($null -ne $possibleLibFiles -and $possibleLibFiles.Count -gt 0) {
+                      # Found one or more files matching the name, take the first one
+                      $foundLibFile = $possibleLibFiles[0]
+                      $sourceLibPath = $foundLibFile.FullName
+                      Write-Host "Found file at: $($sourceLibPath)."
+                      break
                   }
                   if ($i -lt ($maxRetries - 1)) {
-                      Write-Host "File not found, retrying in ${retryDelaySec} seconds..."
+                      Write-Host "File not found via recursive search, retrying in ${retryDelaySec} seconds..."
                       Start-Sleep -Seconds $retryDelaySec
                   }
               }
@@ -243,7 +226,7 @@ jobs:
                       Write-Host "Found '$($originalLibNameWithSuffix)' at '$($foundLibFile.FullName)'. Renaming to '$($targetLibName)' and moving to '$($centralPjsipLibDir)'."
                       Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
                   } else {
-                      Write-Host "##[error]Error: Original library file '$($originalLibNameWithSuffix)' not found after compilation! Extracted path: '$($originalLibFullName)'. Expected file exists at: '$($sourceLibPath)'. Check PJSIP build logs. Failing workflow."
+                      Write-Host "##[error]Error: Original library file '$($originalLibNameWithSuffix)' not found after compilation! Check PJSIP build logs and file system for its actual location. Failing workflow."
                       exit 1 # Fail the workflow if a critical library is not found for renaming
                   }
               } else {
@@ -321,7 +304,7 @@ jobs:
     runs-on: ubuntu-latest
     # Future implementation for Linux ARM (disabled for now)
     # needs: build-windows
-    steps: # Placeholder steps to satisfy GitHub Actions syntax requirements
+    steps: # Placeholder steps to satisfy GitHub Actions Workflow syntax requirements
       - name: Placeholder Linux ARM Build
         run: echo "Linux ARM build job is currently a placeholder."
 
