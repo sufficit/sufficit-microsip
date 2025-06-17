@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.65
-# Last Updated: 2025-06-17 07:13:43 PM -03 (Final fix for underscore/hyphen mismatch in matching $libRenames keys)
+# Action Version: 1.0.66
+# Last Updated: 2025-06-17 07:25:00 PM -03 (Refactored $libRenames and matching logic for robustness)
 # =================================================================================================
 
 name: C++ Build
@@ -138,32 +138,34 @@ jobs:
               "third_party/build/yuv/libyuv.vcxproj"
           )
           
-          # Mapping of original PJSIP output names (with suffix) to desired simple names
-          # NOTE: The keys here MUST match the EXACT file names output by MSBuild for these projects,
-          # including any underscores or hyphens that MSBuild adds.
+          # Mapping of base project names (from vcxproj, normalized) to desired simple names.
+          # The keys here are the base name of the project, standardized to hyphens if original has them,
+          # or the simple name if no hyphen/underscore issue.
+          # The values are the final names that MicroSIP expects.
+          # Opus is already handled separately.
           $libRenames = @{
-              "pjlib-x86_64-x64-vc14-Release.lib" = "pjlib.lib";
-              "pjlib-util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib";
-              "pjnath-x86_64-x64-vc14-Release.lib" = "pjnath.lib";
-              "pjmedia-x86_64-x64-vc14-Release.lib" = "pjmedia.lib";
-              "pjmedia-audiodev-x86_64-x64-vc14-Release.lib" = "pjmedia-audiodev.lib";
-              "pjmedia-codec-x86_64-x64-vc14-Release.lib" = "pjmedia-codec.lib";
-              "pjmedia-videodev-x86_64-x64-vc14-Release.lib" = "pjmedia-videodev.lib";
-              "pjsip-core-x86_64-x64-vc14-Release.lib" = "pjsip-core.lib";
-              "pjsip-simple-x86_64-x64-vc14-Release.lib" = "pjsip-simple.lib";
-              "pjsip-ua-x86_64-x64-vc14-Release.lib" = "pjsip-ua.lib";
-              "pjsua-lib-x86_64-x64-vc14-Release.lib" = "pjsua-lib.lib";
-              "pjsua2-lib-x86_64-x64-vc14-Release.lib" = "pjsua2-lib.lib";
-              "libbaseclasses-x86_64-x64-vc14-Release.lib" = "libbaseclasses.lib";
-              "libg7221codec-x86_64-x64-vc14-Release.lib" = "libg7221codec.lib";
-              "libgsmcodec-x86_64-x64-vc14-Release.lib" = "libgsmcodec.lib";
-              "libilbccodec-x86_64-x64-vc14-Release.lib" = "libilbccodec.lib";
-              "libmilenage-x86_64-x64-vc14-Release.lib" = "libmilenage.lib";
-              "libresample-x86_64-x64-vc14-Release.lib" = "libresample.lib";
-              "libspeex-x86_64-x64-vc14-Release.lib" = "libspeex.lib";
-              "libsrtp-x86_64-x64-vc14-Release.lib" = "libsrtp.lib";
-              "libwebrtc-x86_64-x64-vc14-Release.lib" = "libwebrtc.lib";
-              "libyuv-x86_64-x64-vc14-Release.lib" = "libyuv.lib"
+              "pjlib" = "pjlib.lib";
+              "pjlib-util" = "pjlib-util.lib"; # pjlib_util.vcxproj -> pjlib-util.lib
+              "pjnath" = "pjnath.lib";
+              "pjmedia" = "pjmedia.lib";
+              "pjmedia-audiodev" = "pjmedia-audiodev.lib";
+              "pjmedia-codec" = "pjmedia-codec.lib";
+              "pjmedia-videodev" = "pjmedia-videodev.lib";
+              "pjsip-core" = "pjsip-core.lib";
+              "pjsip-simple" = "pjsip-simple.lib";
+              "pjsip-ua" = "pjsip-ua.lib";
+              "pjsua-lib" = "pjsua-lib.lib";
+              "pjsua2-lib" = "pjsua2-lib.lib";
+              "libbaseclasses" = "libbaseclasses.lib";
+              "libg7221codec" = "libg7221codec.lib";
+              "libgsmcodec" = "libgsmcodec.lib";
+              "libilbccodec" = "libilbccodec.lib";
+              "libmilenage" = "libmilenage.lib";
+              "libresample" = "libresample.lib";
+              "libspeex" = "libspeex.lib";
+              "libsrtp" = "libsrtp.lib";
+              "libwebrtc" = "libwebrtc.lib";
+              "libyuv" = "libyuv.lib"
           }
           
           foreach ($projectFile in $pjsipProjectsToBuild) {
@@ -194,13 +196,12 @@ jobs:
               }
               
               $sourceLibPath = $actualOutputLibPath
-              $originalLibNameWithSuffix = [System.IO.Path]::GetFileName($sourceLibPath) # This gets the *exact* file name as output by MSBuild
+              $actualLibFileName = [System.IO.Path]::GetFileName($sourceLibPath) # e.g., pjlib_util-x86_64-x64-vc14-Release.lib
               
-              # Normalize the extracted name (convert underscores to hyphens) to match keys in $libRenames
-              # This is the CRUCIAL change
-              $normalizedOriginalLibName = $originalLibNameWithSuffix.Replace('_', '-')
-
-              Write-Host "Contents of source directory of '$originalLibNameWithSuffix':"
+              # Extract the base name from the project file, then normalize it to match keys in $libRenames
+              $baseProjectName = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace('_', '-').Replace('.vcxproj', '')
+              
+              Write-Host "Contents of source directory of '$actualLibFileName':"
               Get-ChildItem -Path (Split-Path -Path $sourceLibPath -Parent) -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
               Write-Host "--------------------------------------------------------"
 
@@ -210,7 +211,7 @@ jobs:
 
               # Wait for the .lib file to exist at the *exact* path reported by MSBuild
               for ($i = 0; $i -lt $maxRetries; $i++) {
-                  Write-Host "Attempting to find freshly compiled library '$($originalLibNameWithSuffix)' at '$($sourceLibPath)' (Attempt $($i + 1)/$maxRetries)..."
+                  Write-Host "Attempting to find freshly compiled library '$($actualLibFileName)' at '$($sourceLibPath)' (Attempt $($i + 1)/$maxRetries)..."
                   if (Test-Path -Path $sourceLibPath -PathType Leaf -ErrorAction SilentlyContinue) {
                       $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
                       if ($null -ne $foundLibFile) {
@@ -229,13 +230,13 @@ jobs:
               New-Item -ItemType Directory -Path $centralPjsipLibDir -Force | Out-Null
           
               $targetLibName = $null
-              if ($libRenames.ContainsKey($normalizedOriginalLibName)) { # Use the normalized name to check against the map
-                  $targetLibName = $libRenames[$normalizedOriginalLibName]
-                  Write-Host "DEBUG: Found rename mapping for '$($normalizedOriginalLibName)'. Target name: '$targetLibName'."
+              if ($libRenames.ContainsKey($baseProjectName)) { # Use the normalized base project name to check against the map
+                  $targetLibName = $libRenames[$baseProjectName]
+                  Write-Host "DEBUG: Found rename mapping for base project name '$($baseProjectName)'. Target name: '$targetLibName'."
               } else {
-                  # If no explicit rename mapping, use the original (un-normalized) name as the target name.
-                  $targetLibName = $originalLibNameWithSuffix
-                  Write-Host "##[warning]Warning: No specific rename mapping found for '$($originalLibNameWithSuffix)'. Using its original name as the target name: '$targetLibName'."
+                  # Fallback: if no explicit rename mapping for the base project name, use the actual compiled file name.
+                  $targetLibName = $actualLibFileName
+                  Write-Host "##[warning]Warning: No specific rename mapping found for base project name '$($baseProjectName)'. Using original compiled file name as target: '$targetLibName'."
               }
 
               $targetLibPath = Join-Path -Path $centralPjsipLibDir -ChildPath $targetLibName
@@ -244,7 +245,7 @@ jobs:
                   Write-Host "Found '$($foundLibFile.Name)' at '$($foundLibFile.FullName)'. Moving to '$($targetLibPath)'."
                   Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
               } else {
-                  Write-Host "##[error]Error: Compiled library file '$($originalLibNameWithSuffix)' was reported by MSBuild but not found at '$($sourceLibPath)' after all retries for processing. Failing workflow."
+                  Write-Host "##[error]Error: Compiled library file '$($actualLibFileName)' was reported by MSBuild but not found at '$($sourceLibPath)' after all retries for processing. Failing workflow."
                   exit 1
               }
           }
@@ -297,10 +298,10 @@ jobs:
         with:
           name: microsip-windows-x64-${{ env.BUILD_DATE }}
           path: |
-            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.exe
-            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.pdb
-            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.dll # Ensure this is the correct DLL name
-            D:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.lib # Ensure this is the correct LIB name
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.exe
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.pdb
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.dll # Ensure this is the correct DLL name
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.lib # Ensure this is the correct LIB name
           retention-days: 7
 
   build-linux:
