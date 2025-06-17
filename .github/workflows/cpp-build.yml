@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.45
-# Last Updated: 2025-06-17
+# Action Version: 1.0.46
+# Last Updated: 2025-06-17 12:53:27 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -184,36 +184,29 @@ jobs:
                   exit 1
               }
               
-              # Determine the specific output directory for this .vcxproj
-              # O MSBuild geralmente coloca a saída .lib na pasta 'lib' que é irmã do diretório 'build'
-              # ou diretamente dentro de 'build/lib' dependendo da configuração do projeto.
-              # Vamos extrair o diretório pai do .vcxproj (e.g., "pjlib/build") e então ir um nível acima
-              # para encontrar a pasta "lib" se o padrão for assim, ou ficar no subdiretório 'build/lib'.
+              # Determine the base logical directory of the project (e.g., "pjlib", "pjlib-util", "pjsip", "third_party")
+              # e.g., "pjlib/build/pjlib.vcxproj" -> "pjlib"
+              # e.g., "third_party/build/baseclasses/libbaseclasses.vcxproj" -> "third_party"
+              $projectBaseName = $projectFile.Split('/')[0] # Pega o primeiro segmento do caminho
               
-              $projectVcxprojParentDir = Split-Path -Path $projectFile -Parent # e.g., "pjlib/build" ou "third_party/build/baseclasses"
-              
-              # Tente o caminho comum onde o MSBuild coloca libs PJSIP (irmão do diretório de build)
-              # Ex: external/pjproject/pjlib/lib/
-              $libDirRelativeToOneLevelUp = Join-Path -Path (Split-Path -Path $projectVcxprojParentDir -Parent) -ChildPath "lib"
-              $outputLibDirCandidate1 = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$libDirRelativeToOneLevelUp"
-
-              # Tente o caminho onde a lib pode estar diretamente dentro do diretório de build (para alguns projetos)
-              # Ex: external/pjproject/pjlib/build/lib/
-              $libDirRelativeInsideBuild = Join-Path -Path $projectVcxprojParentDir -ChildPath "lib"
-              $outputLibDirCandidate2 = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$libDirRelativeInsideBuild"
+              $outputLibDir = $null
+              if ($projectBaseName -eq "third_party") {
+                  # Para projetos em third_party, o diretório lib é um nível acima do "build"
+                  # Ex: third_party/build/baseclasses/libbaseclasses.vcxproj -> external/pjproject/third_party/lib
+                  $outputLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/third_party/lib"
+              } else {
+                  # Para outros projetos (pjlib, pjlib-util, pjnath, pjmedia, pjsip), o diretório lib
+                  # é irmã da pasta de projeto (e.g., pjlib/lib)
+                  # Ex: pjlib/build/pjlib.vcxproj -> external/pjproject/pjlib/lib
+                  $outputLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectBaseName/lib"
+              }
 
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
-
-              # Preferir a primeira opção (irmão do build) e fallback para a segunda (dentro do build)
-              $sourceLibPath = $null
-              if (Test-Path (Join-Path $outputLibDirCandidate1 -ChildPath $originalLibNameWithSuffix)) {
-                  $sourceLibPath = Join-Path $outputLibDirCandidate1 -ChildPath $originalLibNameWithSuffix
-              } elseif (Test-Path (Join-Path $outputLibDirCandidate2 -ChildPath $originalLibNameWithSuffix)) {
-                  $sourceLibPath = Join-Path $outputLibDirCandidate2 -ChildPath $originalLibNameWithSuffix
-              }
-
-              $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue # CORRECTION APPLIED HERE
+              
+              # A sourceLibPath é agora mais diretamente construída
+              $sourceLibPath = Join-Path -Path $outputLibDir -ChildPath $originalLibNameWithSuffix
+              $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
           
               # Define the central PJSIP lib directory where all renamed libraries should reside
               $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
