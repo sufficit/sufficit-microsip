@@ -185,17 +185,17 @@ jobs:
               }
               
               # Determine the specific output directory for this .vcxproj
-              # This assumes the output .lib is in a 'lib' directory relative to the .vcxproj parent
-              # This pattern is common in PJSIP's build structure.
-              $projectBaseDir = Split-Path -Path $projectFile -Parent # e.g., "pjlib/build"
-              $outputLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectBaseDir/lib"
+              # A maioria dos projetos PJSIP coloca a saída .lib um nível acima do diretório 'build'
+              # dentro de uma pasta 'lib'. Ex: pjlib/build/pjlib.vcxproj -> pjlib/lib/
+              $projectLogicalDir = (Split-Path -Path $projectFile -Parent).Replace("/build", "") # e.g., "pjlib"
+              $outputLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectLogicalDir/lib" # CORRECTION APPLIED HERE
               
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
               
               # Look for the compiled library directly in its expected output location
               $sourceLibPath = Join-Path -Path $outputLibDir -ChildPath $originalLibNameWithSuffix
-              $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue # CORRECTION APPLIED HERE
+              $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
           
               # Define the central PJSIP lib directory where all renamed libraries should reside
               $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
@@ -210,7 +210,7 @@ jobs:
                       Write-Host "Found '$($originalLibNameWithSuffix)' at '$($foundLibFile.FullName)'. Renaming to '$($targetLibName)' and moving to '$($centralPjsipLibDir)'."
                       Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
                   } else {
-                      Write-Host "##[error]Error: Original library file '$($originalLibNameWithSuffix)' not found after compilation! Expected at '$($sourceLibPath)'. Check PJSIP build logs. Failing workflow." # ADDED MORE INFO FOR DEBUGGING
+                      Write-Host "##[error]Error: Original library file '$($originalLibNameWithSuffix)' not found after compilation! Expected at '$($sourceLibPath)'. Check PJSIP build logs. Failing workflow."
                       exit 1 # Fail the workflow if a critical library is not found for renaming
                   }
               } else {

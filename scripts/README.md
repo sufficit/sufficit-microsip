@@ -4,6 +4,10 @@
 
 This directory contains PowerShell scripts developed and refined in collaboration with Google's Gemini AI to automate the build process for the Sufficit MicroSIP project on GitHub Actions. The primary goal is to ensure a reliable and reproducible build for Windows (x64), with future expansion to Linux and Linux ARM.
 
+## Important Note on File Versions
+
+Please ensure that the `Version` and `Timestamp` (or `Last Updated` / `Last Modified`) comments at the top of relevant script files (e.g., `.ps1` files) and configuration header files (e.g., `.h` files like `config_site_content.h` and `pjsip_extra_defines_content.h`) are **manually updated with each and every change** made to these files. This practice is crucial for traceability and to accurately reflect the state of the build automation.
+
 ## Core Components
 
 The automation relies on two main PowerShell scripts:
