@@ -11,25 +11,31 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.42
+# Action Version: 1.0.35
 # Last Updated: 2025-06-17
 # Description of Changes:
-#   - FIXED: Added detailed comments in English to the BUILD_DATE definition, explaining
-#     the troubleshooting steps taken to achieve a robust timestamp.
-#   - FIXED: Implemented a dedicated PowerShell step to calculate and set `BUILD_DATE`
-#     using `Get-Date -UFormat`, resolving all previous formatting errors by bypassing
-#     limitations of GitHub Actions expression functions.
-#   - FIXED: The `patch_microsip_vcxproj.ps1` script now correctly handles MSBuild properties
-#     like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` by enclosing them in
-#     single quotes to prevent PowerShell parsing errors.
-#   - FIXED: Corrected the path logic for renaming PJSIP libraries within the workflow YAML,
-#     ensuring the correct `.lib` files are found and renamed. This directly addresses
-#     the 'Warning: Original library file ... not found' messages and should finally
-#     resolve the `LNK1181: cannot open input file 'pjlib.lib'` error by moving
-#     all renamed PJSIP libraries to a single, central `external/pjproject/lib` directory.
+#   - FIXED: O script `download_opus_windows.ps1` foi modificado para remover o bloco 'param'
+#     e ler o GitHubToken diretamente do ambiente ($env:GH_PAT). Isso resolveu o erro
+#     "'param' not recognized".
+#   - Fixed: Erro "Cannot find path" para config_site_content.h e pjsip_extra_defines_content.h.
+#     A causa foi a ausência desses ficheiros no diretório 'scripts/'. A solução é que
+#     estes ficheiros devem ser adicionados e committados ao repositório 'sufficit-microsip/scripts'.
+#     Os conteúdos sugeridos foram fornecidos.
+#   - Fixed: Erros de parsing do PowerShell no `patch_microsip_vcxproj.ps1` relacionados
+#     ao uso de here-strings e variáveis do MSBuild. A sintaxe foi ajustada para garantir
+#     que o PowerShell interprete corretamente os literais.
+#   - Fixed: Erro "Cannot open include file: 'json.h'". O caminho de inclusão para `json.h`
+#     foi corrigido de `.\lib\jsoncpp` para `.\lib\jsoncpp\json` no `patch_microsip_vcxproj.ps1`.
+#   - Removidos os placeholders `%(AdditionalIncludeDirectories)` e `%(AdditionalLibraryDirectories)`
+#     e `%(AdditionalDependencies)` do output final do `patch_microsip_vcxproj.ps1` para
+#     garantir controle absoluto sobre os caminhos e bibliotecas, evitando interações inesperadas
+#     com valores herdados ou predefinidos do MSBuild.
+#   - Adicionado um passo de depuração (`List PJSIP Lib Directory Contents`) antes da compilação
+#     do MicroSIP para verificar o conteúdo do diretório de bibliotecas do PJSIP e confirmar
+#     a presença dos arquivos `.lib` esperados, para diagnosticar o erro `LNK1181`.
 # =================================================================================================
 
-name: Compilar MicroSIP no Windows
+name: C++ Build
 
 on:
   push:
@@ -37,50 +43,29 @@ on:
       - main
     tags:
       - 'v*.*.*' # Trigger on version tags like v1.0.0
+  workflow_dispatch: # Allows manual triggering of the workflow
 
 env:
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Automatically provided by GitHub Actions
-  GH_PAT: ${{ secrets.GH_PAT }} # For accessing private repositories/releases if needed
-  # BUILD_DATE will be set in a separate step using PowerShell
+  # Define a variável GH_PAT para ser usada pelo script PowerShell para autenticação
+  # É importante que esta variável seja configurada como um segredo no repositório.
+  GH_PAT: ${{ secrets.GH_PAT }}
 
 jobs:
   build-windows:
-    runs-on: windows-2022 # Use Windows Server 2022 for consistency
+    runs-on: windows-2022
+
     steps:
-      - name: Checkout Repositório Principal
+      # Step 1: Checkout do código-fonte principal
+      - name: Checkout Source Code (sufficit/sufficit-microsip)
         uses: actions/checkout@v4
         with:
           repository: sufficit/sufficit-microsip
-          path: .
-          submodules: recursive # Ensure submodules like PJSIP are checked out
+          path: . # Checkout to the root of the workspace
+          submodules: recursive # Ensure submodules are checked out
           fetch-depth: 1 # Only fetch the latest commit
-          token: ${{ env.GITHUB_TOKEN }}
 
-      - name: Checkout PJSIP para Compilação
-        uses: actions/checkout@v4
-        with:
-          repository: sufficit/pjproject # Replace with your PJSIP fork/repo
-          path: external/pjproject
-          token: ${{ env.GITHUB_TOKEN }} # Use default GITHUB_TOKEN for public repo, or GH_PAT for private
-          submodules: false # PJSIP's submodules are not needed for pre-compiled Opus
-
-      # Step to define BUILD_DATE using PowerShell
-      # --- BUILD_DATE Formatting Troubleshooting History ---
-      # 1. Initial attempt: format('{0:yyyyMMdd-HHmmss}', github.event.head_commit.timestamp)
-      #    Issue: "The format specifiers 'yyyyMMdd-HHmmss' are not valid for objects of type 'String'"
-      #    Reason: GitHub Actions' `format` function expects a DateTime object for date formatting, but `timestamp` is a string.
-      # 2. Second attempt: format('{0:yyyyMMdd-HHmmss}', fromiso8601(github.event.head_commit.timestamp))
-      #    Issue: "Unrecognized function: 'fromiso8601'"
-      #    Reason: `fromiso8601` is not a directly available built-in function in GitHub Actions expressions.
-      # 3. Third attempt: format('{0:yyyyMMdd-HHmmss}', github.run_started_at)
-      #    Issue: "The format specifiers 'yyyyMMdd-HHmmss' are not valid for objects of type 'Null'"
-      #    Reason: Similar to #1, or `github.run_started_at` might sometimes be null or not a parsable DateTime object in this specific context.
-      # 4. Current solution (most robust): Use an inline PowerShell script.
-      #    This leverages PowerShell's native Get-Date cmdlet with -UFormat to guarantee
-      #    correct UTC date/time formatting, and sets the result as an environment variable
-      #    for subsequent steps. This bypasses all GitHub Actions expression parsing complexities for dates.
-      # ----------------------------------------------------
-      - name: Definir Variável BUILD_DATE
+      # Step 2: Gerar data de build para nomear artefatos
+      - name: Get Build Date
         shell: pwsh
         run: |
           # Get current UTC date/time and format it
@@ -89,14 +74,14 @@ jobs:
           # Set as a workflow environment variable for subsequent steps
           Write-Host "BUILD_DATE=$buildDate" >> $env:GITHUB_ENV
 
-      # Step 1: Configurar MSBuild
-      - name: Configurar MSBuild
+      # Step 3: Configurar MSBuild
+      - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
           msbuild-architecture: x64
 
-      # Step 2: Preparar PJSIP (download Opus, configurar headers)
-      - name: Preparar PJSIP
+      # Step 4: Navegar para o diretório PJSIP, baixar e preparar Opus, copiar ficheiros de configuração PJSIP, e compilar PJSIP
+      - name: Prepare and Build PJSIP
         shell: pwsh
         run: |
           # Navegar para o diretório PJSIP
@@ -106,7 +91,7 @@ jobs:
           # Depuração: Verificar a Versão do PowerShell em uso
           Write-Host "PowerShell Version being used:"
           $PSVersionTable | Format-List | Out-String | Write-Host
-
+          
           # Descarregar e preparar bibliotecas Opus para PJSIP
           Write-Host "Executando scripts/download_opus_windows.ps1 para PJSIP (via ficheiro temporário)..."
           # O script download_opus_windows.ps1 está na raiz do repositório principal (sufficit-microsip)
@@ -129,7 +114,7 @@ jobs:
           # Este comando já não passa o token como parâmetro, pois o script lê de $env:GH_PAT
           pwsh -File $tempScriptPath
           Write-Host "Scripts/download_opus_windows.ps1 concluído."
-
+          
           # Copiar ficheiros de configuração PJSIP
           Write-Host "Copiando config_site.h e pjsip_extra_defines.h para PJSIP..."
           # Esses ficheiros devem existir em $env:GITHUB_WORKSPACE/scripts/
@@ -138,13 +123,7 @@ jobs:
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
           Write-Host "Ficheiros de configuração PJSIP copiados."
 
-      # Step 3: Compilar PJSIP (essencial)
-      - name: Compilar PJSIP Essenciais
-        shell: pwsh
-        run: |
-          Set-Location external/pjproject
-          Write-Host "Caminho atual Set-Location: $(Get-Location)"
-          
+          # Compilar projetos PJSIP essenciais
           Write-Host "Compilando projetos PJSIP essenciais..."
           $pjsipProjectsToBuild = @(
               "pjlib/build/pjlib.vcxproj",
@@ -197,7 +176,7 @@ jobs:
               "libwebrtc-x86_64-x64-vc14-Release.lib" = "libwebrtc.lib";
               "libyuv-x86_64-x64-vc14-Release.lib" = "libyuv.lib"
           }
-
+          
           foreach ($projectFile in $pjsipProjectsToBuild) {
               $fullProjectPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectFile"
               Write-Host "Compilando projeto: $fullProjectPath"
@@ -214,16 +193,16 @@ jobs:
               # Search for the newly compiled library file within the entire external/pjproject directory
               # This is robust against variations in MSBuild's exact output path.
               $foundLibFile = Get-ChildItem -Path $env:GITHUB_WORKSPACE\external\pjproject -Filter $originalLibNameWithSuffix -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-
+          
               # Define the central PJSIP lib directory where all renamed libraries should reside
               $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
               # Ensure this central directory exists
               New-Item -ItemType Directory -Path $centralPjsipLibDir -Force | Out-Null
-
+          
               if ($libRenames.ContainsKey($originalLibNameWithSuffix)) {
                   $targetLibName = $libRenames[$originalLibNameWithSuffix]
                   $targetLibPath = Join-Path -Path $centralPjsipLibDir -ChildPath $targetLibName
-
+              
                   if ($null -ne $foundLibFile) {
                       Write-Host "Found '$($originalLibNameWithSuffix)' at '$($foundLibFile.FullName)'. Renaming to '$($targetLibName)' and moving to '$($centralPjsipLibDir)'."
                       Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
@@ -239,32 +218,37 @@ jobs:
           Set-Location $env:GITHUB_WORKSPACE
           Write-Host "Voltando ao diretório raiz do MicroSIP: $(Get-Location)"
 
-      # Step 4: Aplicar patch ao MicroSIP.vcxproj
-      - name: Aplicar Patch ao MicroSIP.vcxproj
+      # Step 5: Patch microsip.vcxproj com caminhos absolutos PJSIP
+      - name: Patch microsip.vcxproj
         shell: pwsh
         run: |
           $microsipVcxprojPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "microsip.vcxproj"
-          
-          # Definir caminhos absolutos como literais para passar para o script de patch
-          # Isso contorna a inconsistência de passagem de variáveis de ambiente com parâmetros nomeados
           $pjsipRoot = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject"
           $pjsipLib = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
           $pjsipAppsInclude = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjsip/include"
-          
           Write-Host "Aplicando patch ao microsip.vcxproj em: $microsipVcxprojPath"
           Write-Host "PJSIP Root: $pjsipRoot"
           Write-Host "PJSIP Lib Path: $pjsipLib"
           Write-Host "PJSIP Apps Include Path: $pjsipAppsInclude"
-          
-          # Chamar o script de patch com todos os parâmetros necessários
-          # Passando os caminhos como literais absolutos para garantir a sua interpretação correta.
           & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
             -ProjFile $microsipVcxprojPath `
             -PjsipIncludeRoot "$pjsipRoot" `
             -PjsipLibRoot "$pjsipLib" `
             -PjsipAppsIncludePath "$pjsipAppsInclude"
 
-      # Step 5: Compilar a solução MicroSIP (final)
+      # DEBUG STEP: List contents of PJSIP lib directory
+      - name: List PJSIP Lib Directory Contents
+        shell: pwsh
+        run: |
+          $pjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
+          Write-Host "Listing contents of $pjsipLibDir:"
+          Get-ChildItem -Path $pjsipLibDir | Format-List FullName, Length, CreationTimeUtc, LastWriteTimeUtc
+          if (-not (Test-Path -Path (Join-Path $pjsipLibDir "pjlib-util.lib"))) {
+              Write-Host "##[error]pjlib-util.lib was NOT found in $pjsipLibDir after all. This is unexpected."
+              exit 1 # Fail immediately if the specific file isn't found
+          }
+
+      # Step 6: Compilar a solução MicroSIP (final)
       - name: Compilar Solução MicroSIP (Final)
         shell: pwsh
         run: |
@@ -277,12 +261,87 @@ jobs:
           }
           Write-Host "Compilação do MicroSIP concluída com sucesso."
 
-      # Step 6: Opcional: Upload de artefatos da compilação do MicroSIP
+      # Step 7: Opcional: Upload de artefatos da compilação do MicroSIP
       - name: Upload de Binários do MicroSIP
         uses: actions/upload-artifact@v4
         with:
-          name: MicroSIP-windows-x64-${{ env.BUILD_DATE }}
+          name: microsip-windows-x64-${{ env.BUILD_DATE }}
           path: |
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\MicroSIP.exe
-            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\MicroSIP.pdb
-          if-no-files-found: error
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.exe
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\microsip.pdb
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.dll # Certifique-se de que este é o nome correto da DLL
+            C:\a\sufficit-microsip\sufficit-microsip\x64\Release\pjproject.lib # Certifique-se de que este é o nome correto da LIB
+          retention-days: 7
+
+  build-linux:
+    runs-on: ubuntu-latest
+    # Implementação futura para Linux e Linux ARM (desabilitada por enquanto)
+    # needs: build-windows # Depende do sucesso do build do Windows se precisar de artefatos comuns
+    # steps:
+    #   - name: Setup Linux Build Environment
+    #     run: echo "Setting up Linux environment..."
+    #   - name: Build on Linux
+    #     run: echo "Building for Linux..."
+    #   - name: Upload Linux Artifacts
+    #     uses: actions/upload-artifact@v4
+    #     with:
+    #       name: linux-build-artifacts
+    #       path: ./build/linux
+
+  build-linux-arm:
+    runs-on: ubuntu-latest
+    # Implementação futura para Linux ARM (desabilitada por enquanto)
+    # needs: build-windows
+    # steps:
+    #   - name: Setup Linux ARM Build Environment
+    #     run: echo "Setting up Linux ARM environment..."
+    #   - name: Build on Linux ARM
+    #     run: echo "Building for Linux ARM..."
+    #   - name: Upload Linux ARM Artifacts
+    #     uses: actions/upload-artifact@v4
+    #     with:
+    #       name: linux-arm-build-artifacts
+    #       path: ./build/linux-arm
+
+  create-release:
+    name: Create GitHub Release
+    if: success() && startsWith(github.ref, 'refs/tags/v') # Only run if the previous job succeeded and it's a tag push
+    runs-on: ubuntu-latest
+    needs: [build-windows] # Certifique-se de que todos os jobs de build que geram artefatos estão listados aqui
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts # Downloads all artifacts into this directory
+
+      - name: List downloaded artifacts (for debug)
+        run: |
+          ls -R artifacts
+
+      - name: Get tag name
+        id: get_tag
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2 # Use um release action mais recente se disponível
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Release ${{ env.TAG_NAME }} (${{ env.BUILD_DATE }})
+          body: |
+            Automated build for tag ${{ env.TAG_NAME }} created on ${{ env.BUILD_DATE }}.
+            See changelog for details.
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/microsip-windows-x64-${{ env.BUILD_DATE }}/*
+          # Adicione mais linhas aqui para incluir artefatos de outros builds (Linux, etc.)
+          # se eles estiverem habilitados e seus artefatos forem baixados para 'artifacts/'
+          # artifacts/linux-build-artifacts/*
+          # artifacts/linux-arm-build-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
