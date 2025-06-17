@@ -4,37 +4,22 @@
 # This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
 # Changes:
-#   - FIXED: Ajustada a lógica de construção de caminhos. Agora, os parâmetros de entrada
-#     ($PjsipIncludeRoot, $PjsipLibRoot, $PjsipAppsIncludePath) são tratados como caminhos
-#     ABSOLUTOS já construídos pela etapa chamadora. Isso elimina a necessidade de lógica
-#     de GetRelativePath ou Join-Path dentro deste script para os caminhos PJSIP.
-#   - Adicionado o bloco `param` para aceitar `PjsipIncludeRoot`, `PjsipLibRoot`,
-#     e `PjsipAppsIncludePath` como parâmetros, resolvendo o erro "A parameter cannot be found".
-#   - Adicionadas verificações para garantir que os nódulos `ClCompile` e `Link` são encontrados,
-#     e se não forem, o script tenta criá-los antes de adicionar os includes/libs.
-#     Isto deve resolver o aviso "Could not find Linker node".
-#   - Ajustados os caminhos de include para serem consistentes e garantir que os cabeçalhos PJSIP
-#     são sempre encontrados corretamente pelo compilador do MicroSIP.
-#   - FIXED: Corrigido `ParserError` na definição do atributo "Condition" para ItemDefinitionGroup.
-#     A string agora é tratata como literal usando um here-string literal de aspas simples (`@' '@`).
-#   - FIXED: Added `external/pjproject/third_party/lib` to `AdditionalLibraryDirectories`
-#     to resolve `LNK1181: cannot open input file 'libyuv.lib'` error (this logic is now part of the appending below).
-#   - FIXED: Removed trailing comma in `$requiredLibDirs` and other arrays to resolve "Missing expression after ','" ParserError.
-#   - NEW: Modified appending strategy for `AdditionalLibraryDirectories` and `AdditionalDependencies`
-#     to prioritize our custom paths and explicitly include common MSBuild default placeholders
-#     like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` by enclosing the entire string
-#     in single quotes to prevent PowerShell from trying to interpret them. This should ensure all necessary
-#     paths are present and in a compatible order for the linker.
+#   - FIXED: The `patch_microsip_vcxproj.ps1` script now correctly handles MSBuild properties
+#     like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` by enclosing them in
+#     single quotes to prevent PowerShell parsing errors.
+#   - FIXED: This version ensures that `AdditionalLibraryDirectories` are set with absolute paths
+#     for PJSIP and third-party libraries (e.g., external/pjproject/lib), making linker resolution
+#     more robust and independent of relative path context.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
-    [string]$ProjFile, # Caminho completo para microsip.vcxproj (ex: C:\a\sufficit-microsip\sufficit-microsip\microsip.vcxproj)
+    [string]$ProjFile, # Complete path to microsip.vcxproj (e.g., C:\a\sufficit-microsip\sufficit-microsip\microsip.vcxproj)
     [Parameter(Mandatory=$true)]
-    [string]$PjsipIncludeRoot, # ex: 'C:\path\to\external\pjproject' (caminho absoluto para a raiz do PJSIP)
+    [string]$PjsipIncludeRoot, # e.g., 'C:\path\to\external\pjproject' (absolute path to PJSIP root)
     [Parameter(Mandatory=$true)]
-    [string]$PjsipLibRoot, # ex: 'C:\path\to\external\pjproject\lib' (caminho absoluto para as libs PJSIP)
+    [string]$PjsipLibRoot, # e.g., 'C:\path\to\external\pjproject\lib' (absolute path to PJSIP libs)
     [Parameter(Mandatory=$true)]
-    [string]$PjsipAppsIncludePath # ex: 'C:\path\to\external\pjproject\pjsip\include' (caminho absoluto para pjsua.h)
+    [string]$PjsipAppsIncludePath # e.g., 'C:\path\to\external\pjproject\pjsip\include' (absolute path to pjsua.h)
 )
 
 Write-Host "Executing patch script for MicroSIP: $ProjFile"
@@ -48,17 +33,20 @@ try {
     $nsManager = New-Object System.Xml.XmlNamespaceManager($projXml.NameTable)
     $nsManager.AddNamespace("msbuild", "http://schemas.microsoft.com/developer/msbuild/2003")
 
-    # O diretório do ficheiro de projeto MicroSIP (que é a raiz do repositório MicroSIP neste caso)
+    # The MicroSIP project file directory (which is the repository root in this case)
     $microsipProjectDir = Split-Path -Path $ProjFile -Parent
     
-    # Os caminhos PJSIP são agora recebidos como absolutos, então precisamos de torná-los
-    # relativos ao diretório do .vcxproj para a propriedade AdditionalIncludeDirectories.
-    # Como microsip.vcxproj está na raiz do repositório, estes são os mesmos que os caminhos PJSIP_..._RELATIVE
-    $pjsipIncludePathForVcxproj = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipIncludeRoot)
-    $pjsipLibPathForVcxproj = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipLibRoot)
-    $pjsipAppsIncludePathForVcxproj = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipAppsIncludePath)
+    # PJSIP paths are received as absolute, so we need to make them
+    # relative to the .vcxproj directory for AdditionalIncludeDirectories.
+    # For AdditionalLibraryDirectories, we will use absolute paths directly.
+    $pjsipIncludePathForVcxproj_Relative = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipIncludeRoot)
+    $pjsipAppsIncludePathForVcxproj_Relative = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipAppsIncludePath)
 
-    # Encontrar ou criar o ItemDefinitionGroup para Release|x64
+    # --- Absolute paths for library directories to ensure robust linker resolution ---
+    $pjsipLibPathForVcxproj_Absolute = $PjsipLibRoot # Already absolute from parameter
+    $thirdPartyLibPathForVcxproj_Absolute = Join-Path -Path $PjsipIncludeRoot -ChildPath "third_party/lib" # This is also absolute
+
+    # Find or create the ItemDefinitionGroup for Release|x64
     $itemDefinitionGroupNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]", $nsManager)
     if (-not $itemDefinitionGroupNode) {
         Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
@@ -70,7 +58,7 @@ try {
         $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 
-    # Encontrar ou criar o nó ClCompile
+    # Find or create the ClCompile node
     $clCompileNode = $itemDefinitionGroupNode.SelectSingleNode("./msbuild:ClCompile", $nsManager)
     if (-not $clCompileNode) {
         Write-Host "Creating missing ClCompile node for Release|x64."
@@ -78,7 +66,7 @@ try {
         $itemDefinitionGroupNode.AppendChild($clCompileNode)
     }
 
-    # Encontrar ou criar o nó Link
+    # Find or create the Link node
     $linkerNode = $itemDefinitionGroupNode.SelectSingleNode("./msbuild:Link", $nsManager)
     if (-not $linkerNode) {
         Write-Host "Creating missing Link node for Release|x64."
@@ -87,22 +75,22 @@ try {
     }
 
 
-    # Processar Includes
+    # Process Includes
     # Add ALL necessary include directories:
-    # 1. MicroSIP's own directories (relativos ao ProjectDir)
+    # 1. MicroSIP's own directories (relative to ProjectDir)
     # 2. Third-party libraries specifically for MicroSIP (e.g., jsoncpp)
-    # 3. All PJSIP core include directories (relativos ao ProjectDir, usando os parâmetros)
+    # 3. All PJSIP core include directories (relative to ProjectDir, using the parameters)
     $requiredIncludes = @(
-        ".", # Para cabeçalhos na raiz do projeto MicroSIP (onde microsip.vcxproj está)
-        ".\lib", # Para cabeçalhos em MicroSIP's lib folder
-        ".\lib\jsoncpp", # Para json.h
-        "$pjsipIncludePathForVcxproj\pjlib\include", # Usar barra invertida para consistência no Windows
-        "$pjsipIncludePathForVcxproj\pjlib-util\include",
-        "$pjsipIncludePathForVcxproj\pjnath\include",
-        "$pjsipIncludePathForVcxproj\pjmedia\include",
-        "$pjsipAppsIncludePathForVcxproj", # Já aponta para external/pjproject/pjsip/include
-        # Adicionar include para Opus, que é copiado para pjlib/include/pj/opus
-        "$pjsipIncludePathForVcxproj\pjlib\include\pj\opus"
+        ".", # For headers in the MicroSIP project root (where microsip.vcxproj is)
+        ".\lib", # For headers in MicroSIP's lib folder
+        ".\lib\jsoncpp", # For json.h
+        "$pjsipIncludePathForVcxproj_Relative\pjlib\include",
+        "$pjsipIncludePathForVcxproj_Relative\pjlib-util\include",
+        "$pjsipIncludePathForVcxproj_Relative\pjnath\include",
+        "$pjsipIncludePathForVcxproj_Relative\pjmedia\include",
+        "$pjsipAppsIncludePathForVcxproj_Relative", # Points to external/pjproject/pjsip/include
+        # Add include for Opus, which is copied to pjlib/include/pj/opus
+        "$pjsipIncludePathForVcxproj_Relative\pjlib\include\pj\opus"
     )
 
     $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
@@ -121,13 +109,13 @@ try {
         Write-Host "Updated AdditionalIncludeDirectories in $ProjFile to include all necessary paths."
     }
 
-    # Processar Library Directories
+    # Process Library Directories
     $additionalLibraryDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
     
-    # Define all required custom library directories relative to microsip.vcxproj
+    # Define all required custom library directories using ABSOLUTE paths
     $requiredLibDirs = @(
-        $pjsipLibPathForVcxproj, # Path to external/pjproject/lib (relative to microsip.vcxproj)
-        (Join-Path -Path $PjsipIncludeRoot -ChildPath "third_party/lib") | ForEach-Object { [System.IO.Path]::GetRelativePath($microsipProjectDir, $_) } # Path to built third-party libs like libyuv.lib (relative to microsip.vcxproj)
+        $pjsipLibPathForVcxproj_Absolute, # Absolute path to external/pjproject/lib (now centralized by renaming step)
+        $thirdPartyLibPathForVcxproj_Absolute # Absolute path to external/pjproject/third_party/lib
     )
 
     # Use a more robust appending method for Library Directories, prioritizing our paths and standard placeholders
