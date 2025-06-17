@@ -11,7 +11,7 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.44
+# Action Version: 1.0.45
 # Last Updated: 2025-06-17
 # =================================================================================================
 
@@ -42,7 +42,7 @@ jobs:
           repository: sufficit/sufficit-microsip
           path: . # Checkout to the root of the workspace
           # FIX: Explicitly pass the token here. This was the recurring error.
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.GH_PAT }} # <--- CORRECTION APPLIED HERE
           fetch-depth: 1 # Only fetch the latest commit
           # IMPORTANT: Removed 'submodules: recursive' because 'sufficit/pjproject'
           # is being explicitly checked out in a separate step below.
