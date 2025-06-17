@@ -10,8 +10,7 @@
 #     persistent LNK1181 errors.
 #   - FIXED: Corrected PowerShell parsing error "The term 'LibraryPath' is not recognized".
 #     MSBuild variables like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` are now
-#     correctly escaped or treated as literal strings within PowerShell, so they are passed
-#     as-is into the XML.
+#     correctly treated as literal strings within PowerShell lists by enclosing them in single quotes.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -52,10 +51,9 @@ try {
     if (-not $itemDefinitionGroupNode) {
         Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
         $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
-        $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", <span class="math-inline">nsManager\.LookupNamespace\("msbuild"\)\)
-\# Set the Condition attribute to the literal string '</span>(Configuration)|$(Platform)'=='Release|x64'.
-        # In PowerShell, this is represented by enclosing it in single quotes and doubling any internal single quotes.
-        <span class="math-inline">itemDefinitionGroupNode\.SetAttribute\("Condition", '''</span>(Configuration)|$(Platform)''==''Release|x64''')
+        $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
+        # Corrected: Use a single-quoted here-string to treat content literally, preventing ParserError
+        <span class="math-inline">itemDefinitionGroupNode\.SetAttribute\("Condition", @'</span>(Configuration)|$(Platform)'=='Release|x64'@')
         $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 
@@ -87,9 +85,9 @@ try {
         "$pjsipIncludePathForVcxproj_Relative\pjmedia\include",
         "$pjsipAppsIncludePathForVcxproj_Relative", # Points to external/pjproject/pjsip/include
         # Add include for Opus, which is copied to pjlib/include/pj/opus
-        "<span class="math-inline">pjsipIncludePathForVcxproj\_Relative\\pjlib\\include\\pj\\opus",
-\# Ensure MSBuild's default include paths are still present but at the end
-'</span> (AdditionalIncludeDirectories)' # Escaped for PowerShell, literal in XML
+        "$pjsipIncludePathForVcxproj_Relative\pjlib\include\pj\opus",
+        # Ensure MSBuild's default include paths are still present but at the end
+        '%(AdditionalIncludeDirectories)' # Correctly treated as literal string by PowerShell
     )
 
     $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
@@ -108,8 +106,8 @@ try {
         $pjsipLibPathForVcxproj_Absolute, # Absolute path to external/pjproject/lib (now centralized by renaming step)
         <span class="math-inline">thirdPartyLibPathForVcxproj\_Absolute, \# Absolute path to external/pjproject/third\_party/lib
 \# Ensure MSBuild's default library paths are still present but at the end
-'</span>(LibraryPath)', # Escaped for PowerShell, literal in XML
-        '%(AdditionalLibraryDirectories)' # Escaped for PowerShell, literal in XML
+'</span>(LibraryPath)', # Corrected: Treated as literal string by PowerShell
+        '%(AdditionalLibraryDirectories)' # Corrected: Treated as literal string by PowerShell
     )
 
     $additionalLibraryDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
