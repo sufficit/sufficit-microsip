@@ -24,8 +24,13 @@
 #   - TENTATIVA FALHADA: A exclusão de projetos problemáticos via `/p:ExcludeProjectsFromBuild`
 #     no MSBuild falhou com o erro "MSB1006: Property is not valid". Esta propriedade não é
 #     um parâmetro de linha de comando para exclusão direta de projetos por GUID.
-#   - SOLUÇÃO ATUAL: Em vez de tentar excluir, agora compilamos APENAS os projetos PJSIP
+#   - SOLUÇÃO ATUAL (PJSIP Build): Em vez de tentar excluir, agora compilamos APENAS os projetos PJSIP
 #     conhecidamente necessários para o MicroSIP, listando-os explicitamente para o MSBuild.
+#     Esta etapa foi bem-sucedida nos últimos logs.
+#   - FIXED: Erro "Cannot bind argument to parameter 'PjsipLibRoot' because it is an empty string."
+#     A causa foi a variável `$pjsipLibRoot` não ser passada corretamente para o `patch_microsip_vcxproj.ps1`.
+#     Agora, garantimos que todas as variáveis de caminho são passadas explicitamente como parâmetros
+#     para o script de patch.
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -168,7 +173,13 @@ jobs:
           Write-Host "Patching pjmedia_codec.vcxproj para PJSIP..."
           $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjmedia/build/pjmedia_codec.vcxproj"
           # O script patch.ps1 está na raiz do repositório principal (sufficit-microsip)
-          & "$env:GITHUB_WORKSPACE/scripts/patch.ps1" -ProjFile $pjmedia_codec_vcxproj_path
+          # As variáveis PjsipIncludeRoot, PjsipLibRoot e PjsipAppsIncludePath são definidas
+          # no momento da chamada para garantir que o script as receba corretamente.
+          & "$env:GITHUB_WORKSPACE/scripts/patch.ps1" `
+            -ProjFile $pjmedia_codec_vcxproj_path `
+            -PjsipIncludeRoot "external/pjproject" ` # Caminho correto para o patch
+            -PjsipLibRoot "external/pjproject/lib" ` # Caminho correto para o patch
+            -PjsipAppsIncludePath "external/pjproject/pjsip/include" # Caminho correto para o patch
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "pjmedia_codec.vcxproj patched."
 
@@ -222,13 +233,14 @@ jobs:
         shell: pwsh
         run: |
           $microsipVcxprojPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "microsip.vcxproj"
+          # Definir as variáveis de caminho aqui para garantir que são válidas quando o script é chamado
           $pjsipIncludeRoot = "external/pjproject" # Relativo à raiz do MicroSIP (onde os módulos PJSIP estão)
           $pjsipLibRoot = "external/pjproject/lib" # Relativo à raiz do MicroSIP (onde as libs PJSIP serão geradas)
           $pjsipAppsIncludePath = "external/pjproject/pjsip/include" # Caminho para pjsua.h
 
           Write-Host "Aplicando patch ao microsip.vcxproj em: $microsipVcxprojPath"
           Write-Host "PJSIP Include Root: $pjsipIncludeRoot"
-          Write-Host "PJSIP Lib Path: $pjsipLibPath"
+          Write-Host "PJSIP Lib Path: $pjsipLibRoot"
           Write-Host "PJSIP Apps Include Path: $pjsipAppsIncludePath"
 
           # Chamar o script de patch com todos os parâmetros necessários
@@ -236,7 +248,7 @@ jobs:
           & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
             -ProjFile $microsipVcxprojPath `
             -PjsipIncludeRoot $pjsipIncludeRoot `
-            -PjsipLibRoot $pjsipLibPath `
+            -PjsipLibRoot $pjsipLibRoot `
             -PjsipAppsIncludePath $pjsipAppsIncludePath
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
