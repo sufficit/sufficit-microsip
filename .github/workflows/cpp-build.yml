@@ -11,7 +11,7 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.38
+# Action Version: 1.0.39
 # Last Updated: 2025-06-17
 # =================================================================================================
 
@@ -54,6 +54,7 @@ jobs:
         with:
           repository: sufficit/pjproject
           path: external/pjproject # Checkout to the desired subdirectory
+          # FIX: Explicitly pass the token here.
           token: ${{ secrets.GH_PAT }}
           submodules: false # No submodules within pjproject itself are needed
           ssh-strict: true
