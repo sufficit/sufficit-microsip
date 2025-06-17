@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.63
-# Last Updated: 2025-06-17 06:31:05 PM -03 (Completed .lib renaming map for all PJSIP libs to fix LNK1181)
+# Action Version: 1.0.64
+# Last Updated: 2025-06-17 07:05:00 PM -03 (Corrected underscore/hyphen mismatch in $libRenames for pjlib_util and others)
 # =================================================================================================
 
 name: C++ Build
@@ -95,24 +95,18 @@ jobs:
           
           # Download and prepare Opus libraries for PJSIP
           Write-Host "Executing scripts/download_opus_windows.ps1 for PJSIP (via temporary file)..."
-          # The download_opus_windows.ps1 script is in the root of the main repository (sufficit-microsip)
-          # Therefore, the path must be relative to GITHUB_WORKSPACE
           $scriptPath = "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1"
           $tempScriptPath = "temp_download_opus.ps1"
           
           $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8
-          # Use .NET class to create UTF8 encoding without BOM
           $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
           Set-Content -Path $tempScriptPath -Value $scriptContent -Encoding $utf8NoBomEncoding
           
-          # Now, execute the temporary file
-          # This command no longer passes the token as a parameter, as the script reads from $env:GH_PAT
           pwsh -File $tempScriptPath
           Write-Host "Scripts/download_opus_windows.ps1 completed."
           
           # Copy PJSIP configuration files
           Write-Host "Copying config_site.h and pjsip_extra_defines.h to PJSIP..."
-          # These files must exist in $env:GITHUB_WORKSPACE/scripts/
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/config_site_content.h" -Destination "pjlib/include/pj/config_site.h" -Force
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
           Write-Host "PJSIP configuration files copied."
@@ -145,21 +139,20 @@ jobs:
           )
           
           # Mapping of original PJSIP output names to desired simple names
-          # Note: Opus is already renamed by download_opus_windows.ps1, so not here.
-          # THIS IS THE UPDATED LIST TO INCLUDE ALL SIMPLIFIED NAMES
+          # CORRECTED: Changed pjlib-util and pjsua* from hyphen to underscore to match MSBuild output
           $libRenames = @{
               "pjlib-x86_64-x64-vc14-Release.lib" = "pjlib.lib";
-              "pjlib-util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib";
+              "pjlib_util-x86_64-x64-vc14-Release.lib" = "pjlib-util.lib"; # CORRECTED
               "pjnath-x86_64-x64-vc14-Release.lib" = "pjnath.lib";
               "pjmedia-x86_64-x64-vc14-Release.lib" = "pjmedia.lib";
               "pjmedia-audiodev-x86_64-x64-vc14-Release.lib" = "pjmedia-audiodev.lib";
               "pjmedia-codec-x86_64-x64-vc14-Release.lib" = "pjmedia-codec.lib";
               "pjmedia-videodev-x86_64-x64-vc14-Release.lib" = "pjmedia-videodev.lib";
-              "pjsip-core-x86_64-x64-vc14-Release.lib" = "pjsip-core.lib";
-              "pjsip-simple-x86_64-x64-vc14-Release.lib" = "pjsip-simple.lib";
-              "pjsip-ua-x86_64-x64-vc14-Release.lib" = "pjsip-ua.lib";
-              "pjsua-lib-x86_64-x64-vc14-Release.lib" = "pjsua-lib.lib"; # Crucial for pjsua.h
-              "pjsua2-lib-x86_64-x64-vc14-Release.lib" = "pjsua2-lib.lib";
+              "pjsip_core-x86_64-x64-vc14-Release.lib" = "pjsip-core.lib"; # CORRECTED
+              "pjsip_simple-x86_64-x64-vc14-Release.lib" = "pjsip-simple.lib"; # CORRECTED
+              "pjsip_ua-x86_64-x64-vc14-Release.lib" = "pjsip-ua.lib"; # CORRECTED
+              "pjsua_lib-x86_64-x64-vc14-Release.lib" = "pjsua-lib.lib"; # CORRECTED (Crucial for pjsua.h)
+              "pjsua2_lib-x86_64-x64-vc14-Release.lib" = "pjsua2-lib.lib"; # CORRECTED
               "libbaseclasses-x86_64-x64-vc14-Release.lib" = "libbaseclasses.lib";
               "libg7221codec-x86_64-x64-vc14-Release.lib" = "libg7221codec.lib";
               "libgsmcodec-x86_64-x64-vc14-Release.lib" = "libgsmcodec.lib";
@@ -185,10 +178,11 @@ jobs:
               }
               
               # Determine the expected original library name with suffix
-              $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
-              $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
-
-              # Extract the actual output .lib path from MSBuild output
+              # This uses the project file name to determine the expected output name from MSBuild
+              $baseProjectName = [System.IO.Path]::GetFileNameWithoutExtension($projectFile)
+              # The logic to determine the original name needs to account for differences like underscore/hyphen in actual output
+              # Let's rebuild the originalLibNameWithSuffix more robustly from the extracted path
+              
               $actualOutputLibPath = $null
               foreach ($line in $rawMsbuildOutput) {
                   if ($line -match "(?i)\.vcxproj -> (.*\.lib)") {
@@ -205,6 +199,7 @@ jobs:
               }
               
               $sourceLibPath = $actualOutputLibPath
+              $originalLibNameWithSuffix = [System.IO.Path]::GetFileName($sourceLibPath) # Use the actual file name from extraction as the key for $libRenames
               
               Write-Host "Contents of source directory of '$originalLibNameWithSuffix':"
               Get-ChildItem -Path (Split-Path -Path $sourceLibPath -Parent) -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
@@ -235,12 +230,13 @@ jobs:
               New-Item -ItemType Directory -Path $centralPjsipLibDir -Force | Out-Null
           
               # FIX: Always get the target library name from $libRenames for consistency
-              # If $originalLibNameWithSuffix is not a key in $libRenames, this will be null.
-              # This indicates a mismatch between expected outputs and the rename map.
-              $targetLibName = $libRenames[$originalLibNameWithSuffix]
-              if ($null -eq $targetLibName) {
-                  # Fallback: if not in the explicit rename map, use the original name as the target name.
-                  # This happens if the original name from MSBuild is already simple, or if we missed a mapping.
+              # If $originalLibNameWithSuffix (the actual name from MSBuild) is a key in $libRenames, use its mapped value.
+              # Otherwise, use its original name.
+              $targetLibName = $null
+              if ($libRenames.ContainsKey($originalLibNameWithSuffix)) {
+                  $targetLibName = $libRenames[$originalLibNameWithSuffix]
+                  Write-Host "DEBUG: Found rename mapping for '$($originalLibNameWithSuffix)'. Target name: '$targetLibName'."
+              } else {
                   $targetLibName = $originalLibNameWithSuffix
                   Write-Host "##[warning]Warning: No specific rename mapping found for '$($originalLibNameWithSuffix)'. Using its original name as the target name: '$targetLibName'."
               }
