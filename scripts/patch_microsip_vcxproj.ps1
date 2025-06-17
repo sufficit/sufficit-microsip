@@ -4,16 +4,18 @@
 # This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
 # Changes:
-#   - FIXED: Removidas as referências diretas a `$(ProjectDir)` e `$(SolutionDir)`
-#     dentro do script. Agora, todos os caminhos são construídos a partir dos parâmetros de entrada
-#     ($ProjFile, $PjsipIncludeRoot, $PjsipLibRoot, $PjsipAppsIncludePath) que devem ser
-#     caminhos absolutos ou relativos à raiz do repositório MicroSIP, não macros do MSBuild.
+#   - FIXED: Ajustada a lógica de construção de caminhos. Agora, os parâmetros de entrada
+#     ($PjsipIncludeRoot, $PjsipLibRoot, $PjsipAppsIncludePath) são tratados como caminhos
+#     RELATIVOS À RAIZ DO REPOSITÓRIO MICRO SIP, onde o script é executado.
+#     O script utiliza `$env:GITHUB_WORKSPACE` para construir caminhos absolutos para os includes/libs PJSIP.
+#     Isto garante que os caminhos gerados no .vcxproj são sempre corretos, independentemente
+#     da localização do .vcxproj dentro do repositório MicroSIP.
 #   - Adicionado o bloco `param` para aceitar `PjsipIncludeRoot`, `PjsipLibRoot`,
 #     e `PjsipAppsIncludePath` como parâmetros, resolvendo o erro "A parameter cannot be found".
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
-    [string]$ProjFile, # Caminho completo para microsip.vcxproj
+    [string]$ProjFile, # Caminho completo para microsip.vcxproj (ex: C:\a\sufficit-microsip\sufficit-microsip\microsip.vcxproj)
     [Parameter(Mandatory=$true)]
     [string]$PjsipIncludeRoot, # ex: 'external/pjproject' (relativo à raiz do MicroSIP)
     [Parameter(Mandatory=$true)]
@@ -33,30 +35,28 @@ try {
     $nsManager = New-Object System.Xml.XmlNamespaceManager($projXml.NameTable)
     $nsManager.AddNamespace("msbuild", "http://schemas.microsoft.com/developer/msbuild/2003")
 
-    # Obter o diretório do ficheiro de projeto MicroSIP (Microsip root)
+    # O diretório do ficheiro de projeto MicroSIP (que é a raiz do repositório MicroSIP neste caso)
     $microsipProjectDir = Split-Path -Path $ProjFile -Parent
     
+    # Construir caminhos absolutos para os diretórios PJSIP
+    # Estes caminhos serão usados para gerar caminhos RELATIVOS NO VCXPROJ
+    $absolutePjsipRoot = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath $PjsipIncludeRoot
+    $absolutePjsipLib = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath $PjsipLibRoot
+    $absolutePjsipAppsInclude = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath $PjsipAppsIncludePath
+
+    # Obter os caminhos a serem adicionados ao VCXPROJ, relativos ao diretório do VCXPROJ.
+    # Como microsip.vcxproj está na raiz do repositório, estes são os mesmos que os caminhos PJSIP_..._RELATIVE
+    $pjsipIncludePathForVcxproj = [System.IO.Path]::GetRelativePath($microsipProjectDir, $absolutePjsipRoot)
+    $pjsipLibPathForVcxproj = [System.IO.Path]::GetRelativePath($microsipProjectDir, $absolutePjsipLib)
+    $pjsipAppsIncludePathForVcxproj = [System.IO.Path]::GetRelativePath($microsipProjectDir, $absolutePjsipAppsInclude)
+
     # Target the main project's ClCompile and Linker configurations
     # We target Release|x64 specifically for includes and libraries
     $clCompileNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:ClCompile", $nsManager)
     $linkerNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:Link", $nsManager)
 
     if ($clCompileNode) {
-        # Construir caminhos relativos ao ficheiro .vcxproj que está a ser patchado.
-        # Os parâmetros $PjsipIncludeRoot, $PjsipLibRoot, $PjsipAppsIncludePath
-        # são passados como caminhos relativos à raiz do repositório MicroSIP.
-        # Precisamos de os converter para serem relativos ao ficheiro .vcxproj (`microsip.vcxproj`).
-
-        # Caminho relativo da raiz do repositório até ao diretório do .vcxproj
-        $relativeRootToProj = [System.IO.Path]::GetRelativePath($microsipProjectDir, (Get-Location).Path) # Assume que estamos na raiz do repositório quando o script é chamado
-        if (-not $relativeRootToProj) { $relativeRootToProj = "." } # Se for o próprio diretório, use "."
-
-        # Ajustar os caminhos PJSIP para serem relativos ao diretório do `microsip.vcxproj`
-        $pjsipIncludePathRelative = [System.IO.Path]::GetRelativePath($microsipProjectDir, (Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath $PjsipIncludeRoot))
-        $pjsipAppsIncludePathRelative = [System.IO.Path]::GetRelativePath($microsipProjectDir, (Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath $PjsipAppsIncludePath))
-        $pjsipLibRootRelative = [System.IO.Path]::GetRelativePath($microsipProjectDir, (Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath $PjsipLibRoot))
-
-        # Adicionar ALL necessary include directories:
+        # Add ALL necessary include directories:
         # 1. MicroSIP's own directories (agora relativos ao ProjectDir)
         # 2. Third-party libraries specifically for MicroSIP (e.g., jsoncpp)
         # 3. All PJSIP core include directories (agora relativos ao ProjectDir, usando os parâmetros)
@@ -64,11 +64,13 @@ try {
             ".\" # Para cabeçalhos na raiz do projeto MicroSIP (onde microsip.vcxproj está)
             ".\lib" # Para cabeçalhos em MicroSIP's lib folder
             ".\lib\jsoncpp" # Para json.h
-            "$pjsipIncludePathRelative/pjlib/include"
-            "$pjsipIncludePathRelative/pjlib-util/include"
-            "$pjsipIncludePathRelative/pjnath/include"
-            "$pjsipIncludePathRelative/pjmedia/include"
-            "$pjsipAppsIncludePathRelative" # Já aponta para external/pjproject/pjsip/include
+            "$pjsipIncludePathForVcxproj/pjlib/include"
+            "$pjsipIncludePathForVcxproj/pjlib-util/include"
+            "$pjsipIncludePathForVcxproj/pjnath/include"
+            "$pjsipIncludePathForVcxproj/pjmedia/include"
+            "$pjsipAppsIncludePathForVcxproj" # Já aponta para external/pjproject/pjsip/include
+            # Adicionar include para Opus, que é copiado para pjlib/include/pj/opus
+            "$pjsipIncludePathForVcxproj/pjlib/include/pj/opus"
         )
 
         $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
@@ -106,21 +108,19 @@ try {
     if ($linkerNode) {
         # Add PJSIP library directories
         $additionalLibraryDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
-        # O caminho da biblioteca PJSIP já é passado como relativo à raiz do MicroSIP.
-        # Ele precisa ser relativo ao diretório do .vcxproj (que é a raiz do MicroSIP)
-        $pjsipLibPathLinker = $pjsipLibRootRelative
+        $libDirToAdd = $pjsipLibPathForVcxproj # Já é o caminho relativo ao microsip.vcxproj
 
         if ($additionalLibraryDirsNode) {
             $currentLibDirs = $additionalLibraryDirsNode.'#text'
-            if ($currentLibDirs -notmatch [regex]::Escape($pjsipLibPathLinker)) {
-                $additionalLibraryDirsNode.'#text' = "$pjsipLibPathLinker;$currentLibDirs"
+            if ($currentLibDirs -notmatch [regex]::Escape($libDirToAdd)) {
+                $additionalLibraryDirsNode.'#text' = "$libDirToAdd;$currentLibDirs"
                 Write-Host "Updated AdditionalLibraryDirectories in $ProjFile to include PJSIP lib path."
             } else {
                 Write-Host "PJSIP library path already present in AdditionalLibraryDirectories."
             }
         } else {
             $newLibNode = $projXml.CreateElement("AdditionalLibraryDirectories", $nsManager.LookupNamespace("msbuild"))
-            $newLibNode.'#text' = "$pjsipLibPathLinker;%(AdditionalLibraryDirectories)"
+            $newLibNode.'#text' = "$libDirToAdd;%(AdditionalLibraryDirectories)"
             $linkerNode.AppendChild($newLibNode)
             Write-Host "Added AdditionalLibraryDirectories node with PJSIP lib path in $ProjFile."
         }

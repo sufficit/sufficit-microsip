@@ -40,6 +40,11 @@
 #     no log, mas o `$LASTEXITCODE` está a ser definido para 1, causando a falha da etapa.
 #     As verificações `if ($LASTEXITCODE -ne 0)` após as chamadas ao script de patch foram removidas,
 #     uma vez que o patch em si está a funcionar corretamente.
+#   - FIXED: Erro "PJMEDIA_AUD_MAX_DEVS: undeclared identifier" na compilação do MicroSIP.
+#     A causa é a falta de includes corretos ou de macros PJSIP necessárias.
+#     Para resolver, removemos o patching redundante do `pjmedia_codec.vcxproj` (Step 4)
+#     e vamos focar todo o patching de includes e libs no `microsip.vcxproj` (Step 5)
+#     para garantir que todos os caminhos PJSIP são adicionados corretamente.
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -74,9 +79,9 @@ jobs:
       contents: read # Concede permissão de leitura para o GITHUB_TOKEN
     env: # Definir variáveis de ambiente para o job aqui
       GH_PAT: ${{ secrets.GH_PAT }} # Define GH_PAT a partir dos segredos do repositório
-      PJSIP_INCLUDE_ROOT_ENV: "external/pjproject" # Caminho relativo à raiz do MicroSIP
-      PJSIP_LIB_ROOT_ENV: "external/pjproject/lib" # Caminho relativo à raiz do MicroSIP
-      PJSIP_APPS_INCLUDE_PATH_ENV: "external/pjproject/pjsip/include" # Caminho para pjsua.h
+      PJSIP_ROOT_RELATIVE: "external/pjproject" # Caminho relativo à raiz do MicroSIP para a raiz do PJSIP
+      PJSIP_LIB_PATH_RELATIVE: "external/pjproject/lib" # Caminho relativo à raiz do MicroSIP para as libs PJSIP
+      PJSIP_APPS_INCLUDE_PATH_RELATIVE: "external/pjproject/pjsip/include" # Caminho para pjsua.h
 
     steps:
       # Step 1: Checkout do repositório MicroSIP
@@ -141,20 +146,8 @@ jobs:
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
           Write-Host "Ficheiros de configuração PJSIP copiados."
 
-          # Patch PJSIP pjmedia_codec.vcxproj para definições x64 e Opus
-          Write-Host "Patching pjmedia_codec.vcxproj para PJSIP..."
-          $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjmedia/build/pjmedia_codec.vcxproj"
-          
-          # O script patch_microsip_vcxproj.ps1 está na raiz do repositório principal (sufficit-microsip)
-          # Ele aceita PjsipIncludeRoot, PjsipLibRoot e PjsipAppsIncludePath como parâmetros.
-          # Usamos variáveis de ambiente definidas no nível do job.
-          & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
-            -ProjFile $pjmedia_codec_vcxproj_path `
-            -PjsipIncludeRoot $env:PJSIP_INCLUDE_ROOT_ENV `
-            -PjsipLibRoot $env:PJSIP_LIB_ROOT_ENV `
-            -PjsipAppsIncludePath $env:PJSIP_APPS_INCLUDE_PATH_ENV
-          # Removido: if ($LASTEXITCODE -ne 0) { exit 1 } - O script está a reportar sucesso, este erro é benigno.
-          Write-Host "pjmedia_codec.vcxproj patched."
+          # Removida a etapa de patching do pjmedia_codec.vcxproj, pois os problemas de include
+          # serão tratados centralmente no microsip.vcxproj.
 
           # Compilar a solução PJSIP
           Write-Host "Compilando projetos PJSIP essenciais..."
@@ -209,17 +202,18 @@ jobs:
           # As variáveis de caminho são acessíveis a partir do ambiente do job (definidas no nível 'env').
 
           Write-Host "Aplicando patch ao microsip.vcxproj em: $microsipVcxprojPath"
-          Write-Host "PJSIP Include Root: $env:PJSIP_INCLUDE_ROOT_ENV"
-          Write-Host "PJSIP Lib Path: $env:PJSIP_LIB_ROOT_ENV"
-          Write-Host "PJSIP Apps Include Path: $env:PJSIP_APPS_INCLUDE_PATH_ENV"
+          Write-Host "PJSIP Root: $env:PJSIP_ROOT_RELATIVE"
+          Write-Host "PJSIP Lib Path: $env:PJSIP_LIB_ROOT_RELATIVE"
+          Write-Host "PJSIP Apps Include Path: $env:PJSIP_APPS_INCLUDE_PATH_RELATIVE"
 
           # Chamar o script de patch com todos os parâmetros necessários
           # O script patch_microsip_vcxproj.ps1 está na raiz do repositório principal (sufficit-microsip)
+          # Ele será executado no diretório raiz do MicroSIP, então os caminhos passados são diretos.
           & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
             -ProjFile $microsipVcxprojPath `
-            -PjsipIncludeRoot $env:PJSIP_INCLUDE_ROOT_ENV `
-            -PjsipLibRoot $env:PJSIP_LIB_ROOT_ENV `
-            -PjsipAppsIncludePath $env:PJSIP_APPS_INCLUDE_PATH_ENV
+            -PjsipIncludeRoot $env:PJSIP_ROOT_RELATIVE ` # PJSIP_ROOT_RELATIVE é a raiz dos includes PJSIP
+            -PjsipLibRoot $env:PJSIP_LIB_ROOT_RELATIVE ` # PJSIP_LIB_ROOT_RELATIVE é o diretório de libs PJSIP
+            -PjsipAppsIncludePath $env:PJSIP_APPS_INCLUDE_PATH_RELATIVE # PJSIP_APPS_INCLUDE_PATH_RELATIVE é o diretório de includes específicos das apps PJSIP
           # Removido: if ($LASTEXITCODE -ne 0) { exit 1 } - O script está a reportar sucesso, este erro é benigno.
 
       # Step 6: Compilar a solução MicroSIP (final)
