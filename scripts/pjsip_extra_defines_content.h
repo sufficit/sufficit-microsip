@@ -1,12 +1,10 @@
-// =================================================================================================
-// PJSIP EXTRA DEFINITIONS FILE
-//
-// This file contains additional, optional define statements for PJSIP.
-// It is intended to be included by config_site.h.
-// =================================================================================================
+/*
+ * PJSIP EXTRA DEFINES CONFIGURATION FILE
+ *
+ * Este ficheiro pode ser usado para adicionar definições de pré-processador
+ * específicas para a sua compilação do PJSIP, que não estão em config_site.h.
+ * Por exemplo: #define PJMEDIA_HAS_G729_CODEC 1
+ */
 
-#define PJMEDIA_HAS_G729_CODEC 0 // Example: Disable G.729 if not needed or licensed
-#define PJSIP_MAX_CALLS 4       // Example: Set maximum number of concurrent calls
-#define PJ_LOG_MAX_LEVEL 5      // Example: Set maximum log level (0=none, 6=verbose)
-
-// Add any other specific defines here
+// Adicione aqui quaisquer definições PJSIP adicionais necessárias para a sua compilação.
+// Exemplo: #define PJ_CUSTOM_SETTING_ENABLED 1
