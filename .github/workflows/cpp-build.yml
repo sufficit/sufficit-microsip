@@ -27,14 +27,14 @@
 #   - SOLUÇÃO ATUAL (PJSIP Build): Em vez de tentar excluir, agora compilamos APENAS os projetos PJSIP
 #     conhecidamente necessários para o MicroSIP, listando-os explicitamente para o MSBuild.
 #     Esta etapa foi bem-sucedida nos últimos logs.
-#   - FIXED: Erro "Cannot bind argument to parameter 'PjsipLibRoot' because it is an empty string."
-#     (persiste na Step 4). A causa é que as variáveis de caminho não estavam a ser passadas
-#     corretamente ao `patch_microsip_vcxproj.ps1` no contexto da Step 4, mesmo com definições locais.
-#     A solução agora é executar o conteúdo do `patch_microsip_vcxproj.ps1` inline,
-#     passando as variáveis como parte do script executado.
-#   - FIXED: Erro "A parameter cannot be found that matches parameter name 'PjsipIncludeRoot'."
-#     (Este foi resolvido ao mudar para `patch_microsip_vcxproj.ps1` e definir as variáveis localmente na Step 4,
-#      mas o problema de passagem ainda persiste, levando à nova abordagem inline).
+#   - FIXED: Erro "Cannot bind argument to parameter 'PjsipLibRoot' porque é uma string vazia."
+#     (persiste na Step 4). Isso foi devido a problemas de escopo de variáveis.
+#   - FIXED: Erro "ParserError: Missing statement after '=' in named argument."
+#     Isso foi causado pela tentativa de executar o patch_microsip_vcxproj.ps1 inline,
+#     que introduziu problemas de parsing de variáveis.
+#   - SOLUÇÃO ATUAL (Patching): As variáveis de caminho PJSIP são agora definidas como variáveis de ambiente
+#     no nível do job, tornando-as acessíveis para todos os scripts PowerShell no job.
+#     O script `patch_microsip_vcxproj.ps1` é chamado diretamente com `&` e usa estas variáveis de ambiente.
 #   - Configured the `Build PJSIP` step to use a Personal Access Token (PAT) for downloading
 #     Opus artifacts, explicitly passing it to `download_opus_windows.ps1` to resolve
 #     `401 Unauthorized` errors for cross-repository access.
@@ -67,6 +67,11 @@ jobs:
     runs-on: windows-latest
     permissions: # Adicione esta seção
       contents: read # Concede permissão de leitura para o GITHUB_TOKEN
+    env: # Definir variáveis de ambiente para o job aqui
+      GH_PAT: ${{ secrets.GH_PAT }} # Define GH_PAT a partir dos segredos do repositório
+      PJSIP_INCLUDE_ROOT_ENV: "external/pjproject" # Caminho relativo à raiz do MicroSIP
+      PJSIP_LIB_ROOT_ENV: "external/pjproject/lib" # Caminho relativo à raiz do MicroSIP
+      PJSIP_APPS_INCLUDE_PATH_ENV: "external/pjproject/pjsip/include" # Caminho para pjsua.h
 
     steps:
       # Step 1: Checkout do repositório MicroSIP
@@ -93,8 +98,6 @@ jobs:
       # Step 4: Compilar PJSIP
       - name: Build PJSIP
         shell: pwsh # Isso garante que o bloco 'run' é interpretado pelo pwsh
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }} # Define GH_PAT a partir dos segredos do repositório
         run: |
           # Navegar para o diretório PJSIP
           Set-Location external/pjproject
@@ -112,44 +115,7 @@ jobs:
           $tempScriptPath = "temp_download_opus.ps1"
 
           # Histórico de tentativas para resolver o erro "param is not recognized" e "Unauthorized":
-          #
-          # 1. Chamada direta com & e aspas duplas (tentativa original):
-          #    & "$env:GITHUB_WORKSPACE\scripts\download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
-          #    Problema: O PowerShell interpretava a barra invertida como escape dentro da string,
-          #              ou o 'param' não era reconhecido por não ser um bloco de script explícito.
-          #              Isso resultava em "The term '\' is not recognized".
-          #
-          # 2. Envolver a chamada em um bloco `pwsh -Command` (tentativa):
-          #    pwsh -Command "& \"$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1\" -GitHubToken \"$env:GH_PAT\""
-          #    Problema: Embora a sintaxe para 'param' fosse tecnicamente correta para um scriptblock,
-          #              a interpolação de variáveis e aspas dentro da string ainda causavam problemas de análise.
-          #              Ainda resultava em "The term 'param' is not recognized" e/ou "The term '\' is not recognized".
-          #
-          # 3. Usar 'pwsh -File' (tentativa mais recente e padrão):
-          #    pwsh -File "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1" -GitHubToken "$env:GH_PAT"
-          #    Problema: Apesar de ser a forma recomendada, o erro 'param' não reconhecido persistiu. Isso indicava
-          #              que, mesmo com o '-File', a interpretação inicial do script falhava, possivelmente devido
-          #              a um ambiente muito sensível ou a caracteres invisíveis.
-          #
-          # 4. Usar Dot-Sourcing (`. $scriptPath`):
-          #    . $scriptPath -GitHubToken "$env:GH_PAT"
-          #    Problema: Mesmo o dot-sourcing falhou com o erro 'param' não reconhecido, o que sugeria um
-          #              problema mais fundamental com a análise do ficheiro em si pelo PowerShell. As verificações
-          #              de depuração mostraram que o ficheiro era encontrado e parecia ter a codificação correta,
-          #              mas o erro persistia.
-          #
-          # 5. Ler conteúdo do script e executar inline com `pwsh -Command "$scriptContent ..."`:
-          #    $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8
-          #    pwsh -Command "$scriptContent -GitHubToken '$env:GH_PAT'"
-          #    Problema: Esta abordagem resultou no erro "The term 'param' is not recognized", o que é
-          #              extremamente incomum, pois `pwsh -Command` deve interpretar o conteúdo da string
-          #              diretamente como código PowerShell. Isso reforça a hipótese de um problema de
-          #              caracteres invisíveis ou de codificação subtil no próprio ficheiro `download_opus_windows.ps1`
-          #              que persiste mesmo após a leitura com -Encoding UTF8.
-          #
-          # Solução proposta que funcionou (V7 do download_opus_windows.ps1): O ficheiro `download_opus_windows.ps1`
-          # foi modificado para remover o bloco `param` e ler o `$env:GH_PAT` diretamente. A execução
-          # via ficheiro temporário com codificação controlada foi mantida para robustez.
+          # (Removido para concisão, mas o histórico completo está nos comentários do topo do ficheiro)
           
           $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8 # Garante que a leitura é UTF8
           # Usa a classe .NET para criar uma codificação UTF8 sem BOM
@@ -174,31 +140,14 @@ jobs:
           Write-Host "Patching pjmedia_codec.vcxproj para PJSIP..."
           $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjmedia/build/pjmedia_codec.vcxproj"
           
-          # Definir as variáveis de caminho localmente para este run block
           # O script patch_microsip_vcxproj.ps1 está na raiz do repositório principal (sufficit-microsip)
-          $pjsipIncludeRoot = "external/pjproject" # Relativo à raiz do MicroSIP
-          $pjsipLibRoot = "external/pjproject/lib" # Relativo à raiz do MicroSIP
-          $pjsipAppsIncludePath = "external/pjproject/pjsip/include" # Caminho relativo à raiz do MicroSIP
-
-          # LEITURA E EXECUÇÃO INLINE DO SCRIPT DE PATCH para contornar problemas de passagem de parâmetros
-          # Isso garante que o script é interpretado diretamente com as variáveis no mesmo escopo.
-          $patchScriptContent = Get-Content "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" -Raw -Encoding UTF8
-          pwsh -Command @"
-          param (
-              [Parameter(Mandatory=\$true)]
-              [string]\$ProjFile,
-              [Parameter(Mandatory=\$true)]
-              [string]\$PjsipIncludeRoot,
-              [Parameter(Mandatory=\$true)]
-              [string]\$PjsipLibRoot,
-              [Parameter(Mandatory=\$true)]
-              [string]\$PjsipAppsIncludePath
-          )
-          
-          # Copie o corpo do script original para aqui
-          $patchScriptContent
-          "@ -ProjFile $pjmedia_codec_vcxproj_path -PjsipIncludeRoot $pjsipIncludeRoot -PjsipLibRoot $pjsipLibRoot -PjsipAppsIncludePath $pjsipAppsIncludePath
-          
+          # Ele aceita PjsipIncludeRoot, PjsipLibRoot e PjsipAppsIncludePath como parâmetros.
+          # Usamos variáveis de ambiente definidas no nível do job.
+          & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
+            -ProjFile $pjmedia_codec_vcxproj_path `
+            -PjsipIncludeRoot $env:PJSIP_INCLUDE_ROOT_ENV `
+            -PjsipLibRoot $env:PJSIP_LIB_ROOT_ENV `
+            -PjsipAppsIncludePath $env:PJSIP_APPS_INCLUDE_PATH_ENV
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Write-Host "pjmedia_codec.vcxproj patched."
 
@@ -252,23 +201,20 @@ jobs:
         shell: pwsh
         run: |
           $microsipVcxprojPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "microsip.vcxproj"
-          # Definir as variáveis de caminho aqui para garantir que são válidas quando o script é chamado
-          $pjsipIncludeRoot = "external/pjproject" # Relativo à raiz do MicroSIP (onde os módulos PJSIP estão)
-          $pjsipLibRoot = "external/pjproject/lib" # Relativo à raiz do MicroSIP (onde as libs PJSIP serão geradas)
-          $pjsipAppsIncludePath = "external/pjproject/pjsip/include" # Caminho para pjsua.h
+          # As variáveis de caminho são acessíveis a partir do ambiente do job (definidas no nível 'env').
 
           Write-Host "Aplicando patch ao microsip.vcxproj em: $microsipVcxprojPath"
-          Write-Host "PJSIP Include Root: $pjsipIncludeRoot"
-          Write-Host "PJSIP Lib Path: $pjsipLibRoot"
-          Write-Host "PJSIP Apps Include Path: $pjsipAppsIncludePath"
+          Write-Host "PJSIP Include Root: $env:PJSIP_INCLUDE_ROOT_ENV"
+          Write-Host "PJSIP Lib Path: $env:PJSIP_LIB_ROOT_ENV"
+          Write-Host "PJSIP Apps Include Path: $env:PJSIP_APPS_INCLUDE_PATH_ENV"
 
           # Chamar o script de patch com todos os parâmetros necessários
           # O script patch_microsip_vcxproj.ps1 está na raiz do repositório principal (sufficit-microsip)
           & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
             -ProjFile $microsipVcxprojPath `
-            -PjsipIncludeRoot $pjsipIncludeRoot `
-            -PjsipLibRoot $pjsipLibRoot `
-            -PjsipAppsIncludePath $pjsipAppsIncludePath
+            -PjsipIncludeRoot $env:PJSIP_INCLUDE_ROOT_ENV `
+            -PjsipLibRoot $env:PJSIP_LIB_ROOT_ENV `
+            -PjsipAppsIncludePath $env:PJSIP_APPS_INCLUDE_PATH_ENV
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       # Step 6: Compilar a solução MicroSIP (final)
