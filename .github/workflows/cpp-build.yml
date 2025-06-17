@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.55
-# Last Updated: 2025-06-17 01:55:00 PM -03
+# Action Version: 1.0.56
+# Last Updated: 2025-06-17 01:59:00 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -47,6 +47,8 @@ jobs:
           # is being explicitly checked out in a separate step below.
 
       # Step 1.5: Checkout pjproject explicitly
+      # This step ensures pjproject is always in external/pjproject,
+      # independent of whether it's a git submodule in the main repo.
       - name: Checkout pjproject (sufficit/pjproject)
         uses: actions/checkout@v4
         with:
@@ -186,10 +188,14 @@ jobs:
               
               # Debug: List contents of the project's temporary output directory
               # This path needs to be adjusted based on the projectFile structure, as MSBuild output folder is relative to vcxproj.
-              $projectOutputPath = Split-Path -Path $fullProjectPath -Parent | Join-Path -ChildPath "output"
-              # Expected format: C:\a\sufficit-microsip\sufficit-microsip\external\pjproject\pjlib-util\build\output
-              Write-Host "Contents of project output path '$projectOutputPath':"
-              Get-ChildItem -Path $projectOutputPath -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
+              $projectBuildDir = Split-Path -Path $fullProjectPath -Parent
+              $expectedIntermediateLibDir = Join-Path -Path $projectBuildDir -ChildPath "output\$libNameWithoutSuffix-x86_64-x64-vc14-Release" # Corrected path: it's a directory, not a file at this stage
+              
+              # Construct the full path to the freshly compiled .lib file in the intermediate output directory
+              $tempSourceLibPath = Join-Path -Path $expectedIntermediateLibDir -ChildPath $originalLibNameWithSuffix
+              
+              Write-Host "Contents of project output path '$expectedIntermediateLibDir':"
+              Get-ChildItem -Path $expectedIntermediateLibDir -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
               Write-Host "--------------------------------------------------------"
 
               # Determine the expected original library name with suffix (e.g., pjlib-util-x86_64-x64-vc14-Release.lib)
@@ -201,20 +207,18 @@ jobs:
               $maxRetries = 5
               $retryDelaySec = 5 # Increased delay between retries
               
+              # Wait for the .lib file to appear in the intermediate output directory
               for ($i = 0; $i -lt $maxRetries; $i++) {
-                  Write-Host "Attempting recursive search for '$($originalLibNameWithSuffix)' within 'external/pjproject' (Attempt $($i + 1)/$maxRetries)..."
-                  # Search for the .lib file anywhere within the external/pjproject directory
-                  $possibleLibFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE/external/pjproject -Recurse -File -Filter "*.lib" -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $originalLibNameWithSuffix }
-                  
-                  if ($null -ne $possibleLibFiles -and $possibleLibFiles.Count -gt 0) {
-                      # Found one or more files matching the name, take the first one
-                      $foundLibFile = $possibleLibFiles[0]
-                      $sourceLibPath = $foundLibFile.FullName
-                      Write-Host "Found file at: $($sourceLibPath)."
-                      break
+                  Write-Host "Attempting to find freshly compiled intermediate library '$($originalLibNameWithSuffix)' at '$($tempSourceLibPath)' (Attempt $($i + 1)/$maxRetries)..."
+                  if (Test-Path -Path $tempSourceLibPath -PathType Leaf -ErrorAction SilentlyContinue) {
+                      $foundLibFile = Get-Item -Path $tempSourceLibPath -ErrorAction SilentlyContinue
+                      if ($null -ne $foundLibFile) {
+                          Write-Host "Found intermediate file."
+                          break
+                      }
                   }
                   if ($i -lt ($maxRetries - 1)) {
-                      Write-Host "File not found via recursive search, retrying in ${retryDelaySec} seconds..."
+                      Write-Host "Intermediate file not found, retrying in ${retryDelaySec} seconds..."
                       Start-Sleep -Seconds $retryDelaySec
                   }
               }
@@ -230,6 +234,7 @@ jobs:
               
                   if ($null -ne $foundLibFile) {
                       Write-Host "Found '$($originalLibNameWithSuffix)' at '$($foundLibFile.FullName)'. Renaming to '$($targetLibName)' and moving to '$($centralPjsipLibDir)'."
+                      # Perform the move operation from the intermediate output directory
                       Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
                   } else {
                       Write-Host "##[error]Error: Original library file '$($originalLibNameWithSuffix)' not found after compilation! Check PJSIP build logs and file system for its actual location. Failing workflow."
@@ -237,6 +242,14 @@ jobs:
                   }
               } else {
                   Write-Host "##[warning]Warning: No rename mapping found for '$($originalLibNameWithSuffix)'. Leaving as is."
+                  # If no rename mapping, still try to move the intermediate .lib to the central lib directory
+                  # This covers cases like "pjlib-util-x86_64-x64-vc14-Release.lib" which don't have a simple rename,
+                  # but should still end up in the central lib folder.
+                  if ($null -ne $foundLibFile) {
+                      $targetNoRenamePath = Join-Path -Path $centralPjsipLibDir -ChildPath $originalLibNameWithSuffix
+                      Write-Host "Moving unrenamed '$($originalLibNameWithSuffix)' from '$($foundLibFile.FullName)' to '$($centralPjsipLibDir)'."
+                      Move-Item -Path $foundLibFile.FullName -Destination $targetNoRenamePath -Force
+                  }
               }
           }
           Write-Host "PJSIP compilation completed."
