@@ -14,16 +14,18 @@
 #   - Removed the `%(AdditionalIncludeDirectories)` and `%(AdditionalLibraryDirectories)` placeholders
 #     from the final XML output strings for absolute control over build paths, as all necessary
 #     paths are now explicitly listed.
+#   - ADDED: Explicitly removes any existing <AdditionalDependencies> nodes that might contain
+#     the old 'libpjproject-x86_64-x64-vc14-Release-Static.lib' reference to prevent LNK1104.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
     [string]$ProjFile, # Complete path to microsip.vcxproj (e.g., C:\a\sufficit-microsip\sufficit-microsip\microsip.vcxproj)
     [Parameter(Mandatory=$true)]
-    [string]$PjsipIncludeRoot, # e.g., 'C:\path\to\external\pjproject' (absolute path to PJSIP root)
+    [string]$PjsipIncludeRoot, # e.g., 'C:\a\sufficit-microsip\sufficit-microsip\external\pjproject'
     [Parameter(Mandatory=$true)]
-    [string]$PjsipLibRoot, # e.g., 'C:\path\to\external\pjproject\lib' (absolute path to PJSIP libs)
+    [string]$PjsipLibRoot, # e.g., 'C:\a\sufficit-microsip\sufficit-microsip\external\pjproject\lib'
     [Parameter(Mandatory=$true)]
-    [string]$PjsipAppsIncludePath # e.g., 'C:\path\to\external\pjproject\pjsip\include' (absolute path to pjsua.h)
+    [string]$PjsipAppsIncludePath # e.g., 'C:\a\sufficit-microsip\sufficit-microsip\external\pjproject\pjsip\include'
 )
 
 Write-Host "Executing patch script for MicroSIP: $ProjFile"
@@ -37,97 +39,65 @@ try {
     $nsManager = New-Object System.Xml.XmlNamespaceManager($projXml.NameTable)
     $nsManager.AddNamespace("msbuild", "http://schemas.microsoft.com/developer/msbuild/2003")
 
-    # The MicroSIP project file directory (which is the repository root in this case)
-    $microsipProjectDir = Split-Path -Path $ProjFile -Parent
-    
-    # PJSIP paths are received as absolute, so we need to make them
-    # relative to the .vcxproj directory for AdditionalIncludeDirectories.
-    $pjsipIncludePathForVcxproj_Relative = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipIncludeRoot)
-    $pjsipAppsIncludePathForVcxproj_Relative = [System.IO.Path]::GetRelativePath($microsipProjectDir, $PjsipAppsIncludePath)
-
-    # --- Absolute paths for library directories to ensure robust linker resolution ---
-    $pjsipLibPathForVcxproj_Absolute = $PjsipLibRoot # Already absolute from parameter
-    $thirdPartyLibPathForVcxproj_Absolute = Join-Path -Path $PjsipIncludeRoot -ChildPath "third_party/lib" # This is also absolute
-
-    # Find or create the ItemDefinitionGroup for Release|x64
+    # Select the relevant ItemDefinitionGroup for Release|x64
     $itemDefinitionGroupNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]", $nsManager)
+
     if (-not $itemDefinitionGroupNode) {
-        Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
-        $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
-        $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
-        # Corrected: Use a single-quoted here-string variable for the attribute value.
-        # The closing marker for a here-string must be on its own line.
-        $conditionValue = @'
-$(Configuration)|$(Platform)'=='Release|x64'
-'@
-        $itemDefinitionGroupNode.SetAttribute("Condition", $conditionValue)
-        $projectNode.AppendChild($itemDefinitionGroupNode)
+        Write-Host "##[error]Error: Could not find Release|x64 ItemDefinitionGroup in $ProjFile."
+        exit 1
     }
 
-    # Find or create the ClCompile node
+    # --- Patching Include Paths ---
     $clCompileNode = $itemDefinitionGroupNode.SelectSingleNode("./msbuild:ClCompile", $nsManager)
     if (-not $clCompileNode) {
-        Write-Host "Creating missing ClCompile node for Release|x64."
-        $clCompileNode = $projXml.CreateElement("ClCompile", $nsManager.LookupNamespace("msbuild"))
-        $itemDefinitionGroupNode.AppendChild($clCompileNode)
+        Write-Host "##[error]Error: Could not find ClCompile node within Release|x64 ItemDefinitionGroup in $ProjFile."
+        exit 1
     }
-
-    # Find or create the Link node
-    $linkerNode = $itemDefinitionGroupNode.SelectSingleNode("./msbuild:Link", $nsManager)
-    if (-not $linkerNode) {
-        Write-Host "Creating missing Link node for Release|x64."
-        $linkerNode = $projXml.CreateElement("Link", $nsManager.LookupNamespace("msbuild"))
-        $itemDefinitionGroupNode.AppendChild($linkerNode)
-    }
-
-
-    # Process AdditionalIncludeDirectories (Replace existing for full control)
-    $requiredIncludes = @(
-        ".", # For headers in the MicroSIP project root (where microsip.vcxproj is)
-        ".\lib", # For headers in MicroSIP's lib folder
-        ".\lib\jsoncpp\json", # Corrected path for json.h
-        "$pjsipIncludePathForVcxproj_Relative\pjlib\include",
-        "$pjsipIncludePathForVcxproj_Relative\pjlib-util\include",
-        "$pjsipIncludePathForVcxproj_Relative\pjnath\include",
-        "$pjsipIncludePathForVcxproj_Relative\pjmedia\include",
-        "$pjsipAppsIncludePathForVcxproj_Relative", # Points to external/pjproject/pjsip/include
-        # Add include for Opus, which is copied to pjlib/include/pj/opus
-        "$pjsipIncludePathForVcxproj_Relative\pjlib\include\pj\opus"
-        # Removed: '%(AdditionalIncludeDirectories)' for absolute control
-    )
 
     $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
     if (-not $additionalIncludeDirsNode) {
         $additionalIncludeDirsNode = $projXml.CreateElement("AdditionalIncludeDirectories", $nsManager.LookupNamespace("msbuild"))
         $clCompileNode.AppendChild($additionalIncludeDirsNode)
     }
-    # Replace content, ensuring unique paths
-    $additionalIncludeDirsNode.'#text' = ($requiredIncludes | Select-Object -Unique) -join ';'
+
+    # Define all required include paths relative to the project root
+    $includePaths = @(
+        ".",
+        ".\lib",
+        ".\lib\jsoncpp\json",
+        "external\pjproject\pjlib\include",
+        "external\pjproject\pjlib-util\include",
+        "external\pjproject\pjnath\include",
+        "external\pjproject\pjmedia\include",
+        "external\pjproject\pjsip\include",
+        "external\pjproject\pjlib\include\pj\opus" # For Opus headers
+    )
+    # Join paths with semicolon. Removed %(AdditionalIncludeDirectories) for absolute control.
+    $additionalIncludeDirsNode.'#text' = ($includePaths | Select-Object -Unique) -join ';'
     Write-Host "Set AdditionalIncludeDirectories in $ProjFile to: $($additionalIncludeDirsNode.'#text')"
 
-
-    # Process AdditionalLibraryDirectories (Replace existing for full control)
-    $requiredLibDirs = @(
-        $pjsipLibPathForVcxproj_Absolute, # Absolute path to external/pjproject/lib (now centralized by renaming step)
-        $thirdPartyLibPathForVcxproj_Absolute, # Absolute path to external/pjproject/third_party/lib
-        '$(LibraryPath)' # Corrected: Treated as literal string by PowerShell
-        # Removed: '%(AdditionalLibraryDirectories)' for absolute control
-    )
-
-    $additionalLibraryDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
-    if (-not $additionalLibraryDirsNode) {
-        $additionalLibraryDirsNode = $projXml.CreateElement("AdditionalLibraryDirectories", $nsManager.LookupNamespace("msbuild"))
-        $linkerNode.AppendChild($additionalLibraryDirsNode)
+    # --- Patching Library Paths and Dependencies ---
+    $linkerNode = $itemDefinitionGroupNode.SelectSingleNode("./msbuild:Link", $nsManager)
+    if (-not $linkerNode) {
+        Write-Host "##[error]Error: Could not find Link node within Release|x64 ItemDefinitionGroup in $ProjFile."
+        exit 1
     }
-    # Replace content, ensuring unique paths
-    $additionalLibraryDirsNode.'#text' = ($requiredLibDirs | Select-Object -Unique) -join ';'
-    Write-Host "Set AdditionalLibraryDirectories in $ProjFile to: $($additionalLibraryDirsNode.'#text')"
 
+    # Ensure absolute paths for Library Directories
+    # Removed %(AdditionalLibraryDirectories) for absolute control.
+    $additionalLibDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
+    if (-not $additionalLibDirsNode) {
+        $additionalLibDirsNode = $projXml.CreateElement("AdditionalLibraryDirectories", $nsManager.LookupNamespace("msbuild"))
+        $linkerNode.AppendChild($additionalLibDirsNode)
+    }
+    # Explicitly set the library directories.
+    $additionalLibDirsNode.'#text' = "${PjsipLibRoot};${PjsipLibRoot}\third_party;$(LibraryPath)" # Keep $(LibraryPath) for system libs
+    Write-Host "Set AdditionalLibraryDirectories in $ProjFile to: $($additionalLibDirsNode.'#text')"
 
-    # Add PJSIP additional dependencies (libraries) (Replace existing for full control)
+    # List all PJSIP libraries that are being compiled/renamed
     $pjsipLibs = @(
         "pjlib.lib",
-        "pjlib-util.lib",
+        "pjlib-util.lib", # pjlib_util.vcxproj -> pjlib-util.lib
         "pjnath.lib",
         "pjmedia.lib",
         "pjmedia-audiodev.lib",
@@ -136,7 +106,7 @@ $(Configuration)|$(Platform)'=='Release|x64'
         "pjsip-core.lib",
         "pjsip-simple.lib",
         "pjsip-ua.lib",
-        "pjsua-lib.lib", # Crucial for pjsua.h
+        "pjsua-lib.lib",
         "pjsua2-lib.lib",
         "libbaseclasses.lib",
         "libg7221codec.lib",
@@ -174,8 +144,17 @@ $(Configuration)|$(Platform)'=='Release|x64'
     $additionalDependenciesNode.'#text' = ($pjsipLibs + $windowsCommonLibs | Select-Object -Unique) -join ';'
     Write-Host "Set AdditionalDependencies in $ProjFile to: $($additionalDependenciesNode.'#text')"
 
+    # Remove any specific old PJSIP static library references if they exist as separate nodes
+    # This specifically targets the "libpjproject-x86_64-x64-vc14-Release-Static.lib" issue.
+    $oldPjsipLibNodes = $linkerNode.SelectNodes("child::*[normalize-space(.)='libpjproject-x86_64-x64-vc14-Release-Static.lib']", $nsManager)
+    foreach ($oldNode in $oldPjsipLibNodes) {
+        Write-Host "Removing old PJSIP static library reference: $($oldNode.'#text')"
+        $oldNode.ParentNode.RemoveChild($oldNode)
+    }
+
     $projXml.Save($ProjFile)
     Write-Host "Successfully patched $ProjFile."
+
 } catch {
     Write-Host "##[error]Error patching $($ProjFile): $($_.Exception.Message)"
     exit 1
