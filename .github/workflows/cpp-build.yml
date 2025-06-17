@@ -11,7 +11,7 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.40
+# Action Version: 1.0.41
 # Last Updated: 2025-06-17
 # Description of Changes:
 #   - FIXED: Implemented a dedicated PowerShell step to calculate and set `BUILD_DATE`
@@ -20,9 +20,10 @@
 #   - FIXED: The `patch_microsip_vcxproj.ps1` script now correctly handles MSBuild properties
 #     like `$(LibraryPath)` and `%(AdditionalLibraryDirectories)` by enclosing them in
 #     single quotes to prevent PowerShell parsing errors.
-#   - NEW: Added a post-build renaming step for PJSIP libraries to match the simpler
-#     names expected by the MicroSIP project (e.g., `pjlib.lib` instead of `pjlib-x86_64-x64-vc14-Release.lib`).
-#     This directly addresses the `LNK1181: cannot open input file 'pjlib.lib'` error.
+#   - FIXED: Corrected the path logic for renaming PJSIP libraries within the workflow YAML,
+#     ensuring the correct `.lib` files are found and renamed. This directly addresses
+#     the 'Warning: Original library file ... not found' messages and should finally
+#     resolve the `LNK1181: cannot open input file 'pjlib.lib'` error.
 # =================================================================================================
 
 name: Compilar MicroSIP no Windows
@@ -189,18 +190,21 @@ jobs:
               }
               
               # Rename the output .lib file
-              $outputLibDir = Join-Path -Path (Split-Path -Path $fullProjectPath -Parent) -ChildPath "lib"
+              # The output .lib files are typically in a 'lib' directory that is a sibling to the 'build' directory.
+              $projectDirBase = Split-Path -Path (Split-Path -Path $fullProjectPath -Parent) -Parent # e.g., C:\a\sufficit-microsip\sufficit-microsip\external\pjproject\pjlib
+              $actualOutputLibDir = Join-Path -Path $projectDirBase -ChildPath "lib" # e.g., C:\a\sufficit-microsip\sufficit-microsip\external\pjproject\pjlib\lib
+
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
-              $originalLibPath = Join-Path -Path $outputLibDir -ChildPath $originalLibNameWithSuffix
+              $originalLibPath = Join-Path -Path $actualOutputLibDir -ChildPath $originalLibNameWithSuffix
 
               if ($libRenames.ContainsKey($originalLibNameWithSuffix)) {
                   $targetLibName = $libRenames[$originalLibNameWithSuffix]
-                  $targetLibPath = Join-Path -Path $outputLibDir -ChildPath $targetLibName
+                  $targetLibPath = Join-Path -Path $actualOutputLibDir -ChildPath $targetLibName
 
                   if (Test-Path $originalLibPath) {
-                      Write-Host "Renaming $($originalLibNameWithSuffix) to $($targetLibName)"
+                      Write-Host "Renaming $($originalLibNameWithSuffix) to $($targetLibName) in $($actualOutputLibDir)"
                       Rename-Item -Path $originalLibPath -NewName $targetLibName -Force
                   } else {
                       Write-Host "##[warning]Warning: Original library file '$($originalLibNameWithSuffix)' not found at '$($originalLibPath)'. Skipping rename."
