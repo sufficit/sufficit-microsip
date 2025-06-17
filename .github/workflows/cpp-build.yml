@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.52
-# Last Updated: 2025-06-17 01:31:28 PM -03
+# Action Version: 1.0.53
+# Last Updated: 2025-06-17 01:39:57 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -177,10 +177,9 @@ jobs:
               $fullProjectPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectFile"
               Write-Host "Compiling project: $fullProjectPath"
               
-              # Capture MSBuild output to find the exact .lib path
-              # We use /nologo to get cleaner output, essential for parsing
-              $msbuildOutput = & msbuild.exe "$fullProjectPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true /nologo | Out-String
-              Write-Host $msbuildOutput # Output the build log for debugging
+              # Execute MSBuild and capture output line by line (no Out-String to preserve line integrity for regex)
+              $rawMsbuildOutput = & msbuild.exe "$fullProjectPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true /nologo
+              Write-Host ($rawMsbuildOutput | Out-String) # Still output for debugging, but process raw lines for extraction
               
               if ($LASTEXITCODE -ne 0) {
                   Write-Host "##[error]PJSIP project compilation failed for $projectFile."
@@ -189,10 +188,10 @@ jobs:
               
               # Extract the exact output .lib path from MSBuild output
               # Look for lines like "project.vcxproj -> C:\path\to\lib\project-x86_64-x64-vc14-Release.lib"
-              # More robust parsing: find the line ending with '.lib' that contains '.vcxproj ->'
-              $originalLibFullName = ($msbuildOutput | Where-Object { $_ -match "\.vcxproj -> .*?\.lib$" } | ForEach-Object {
+              # Use Select-Object -First 1 to get only the first match, in case of multiple similar lines
+              $originalLibFullName = ($rawMsbuildOutput | Where-Object { $_ -match "\.vcxproj -> .*?\.lib$" } | ForEach-Object {
                   ($_ -replace ".*->\s*", "" -replace "`r`n", "").Trim()
-              })
+              } | Select-Object -First 1)
               
               $libNameWithoutSuffix = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace(".vcxproj", "")
               $originalLibNameWithSuffix = "$libNameWithoutSuffix-x86_64-x64-vc14-Release.lib"
