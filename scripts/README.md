@@ -48,7 +48,6 @@ This script has been the source of the most challenging debugging due to interac
     * Upon successful location, the script either **renames and moves** the file to a central `external/pjproject/lib` directory (if a specific rename mapping exists in `$libRenames`) or **moves it as-is** to this central directory (if no specific rename is needed).
     * This robust approach ensures that all necessary PJSIP `.lib` files are correctly collected into a single, predictable location for linking by MicroSIP, regardless of their original output path variations from MSBuild.
 
-### 4. `patch_microsip_vcxproj.ps1` (Additional Fixes for MicroSIP linking)
 * **Problem 2:** PowerShell `ParserError` related to here-strings and MSBuild variables in XML attributes (e.g., "The term 'LibraryPath' is not recognized," "Missing ')' in method call," "No characters are allowed after a here-string header").
 * **Solution 2:**
     * The problematic `Condition` attribute for `ItemDefinitionGroup` is now set using an **intermediate PowerShell variable** that holds the literal here-string value. This separates the here-string's strict parsing rules from the `SetAttribute` method call.
@@ -61,6 +60,27 @@ This script has been the source of the most challenging debugging due to interac
 * **Problem 4:** Potential issues from inherited or default MSBuild paths/dependencies still being used (e.g., `%(AdditionalIncludeDirectories)`, `%(AdditionalLibraryDirectories)`, `%(AdditionalDependencies)`).
 * **Solution 4:**
     * These placeholders were **removed** from the final `AdditionalIncludeDirectories`, `AdditionalLibraryDirectories`, and `AdditionalDependencies` strings written to `microsip.vcxproj`. This ensures that only the explicitly defined paths and libraries are used, preventing unexpected conflicts or missing paths that might arise from MSBuild's default resolution.
+
+### 4. `mainDlg.h` and Linker Errors (Latest Debugging Session: June 18, 2025)
+
+* **Problem 1: `LNK1104: cannot open file 'libpjproject-x86_64-x64-vc14-Release-Static.lib'`**
+    * **Root Cause:** The `libpjproject-x86_64-x64-vc14-Release-Static.lib` estava sendo referenciada por uma diretiva `#pragma comment(lib, ...)` diretamente no `mainDlg.h`, ignorando as configurações do `.vcxproj` e as renomeações de biblioteca feitas pelos scripts. O linker estava tentando encontrar uma biblioteca com o nome exato do artefato original da PJSIP, que não existia mais após a nossa etapa de renomeação.
+    * **Solution:** Removed the entire `#pragma comment(lib, ...)` block from `mainDlg.h`. All library dependencies are now explicitly managed by `patch_microsip_vcxproj.ps1` in the `.vcxproj` file.
+    * **Related Note:** `patch_microsip_vcxproj.ps1` (v1.0.78) also includes a `/NODEFAULTLIB:libpjproject-x86_64-x64-vc14-Release-Static.lib` in `AdditionalOptions` do linker como uma camada extra de proteção contra referências implícitas, embora a remoção do `#pragma` seja a correção principal.
+
+* **Problem 2: `error C4430: missing type specifier - int assumed. Note: C++ does not support default-int` and `error C2556: 'void CmainDlg::BaloonPopup(CString,CString,DWORD)': overloaded function differs only by return type from 'int CmainDlg::BaloonPopup(CString,CString,DWORD)'`**
+    * **Root Cause:** A declaração da função `BaloonPopup` em `mainDlg.h` estava faltando o especificador de tipo de retorno `void` na definição da classe `CmainDlg`. O compilador assumiu `int` por padrão para essa declaração, o que entrava em conflito com a definição real da função (que é `void`).
+    * **Solution:** Corrected the function signature in `mainDlg.h` to explicitly include `void` as the return type: `void BaloonPopup(CString title, CString message, DWORD flags = NIIF_WARNING);`.
+
+* **Problem 3: `LNK2001: unresolved external symbol` for video functions (`pjsua_vid_codec_set_priority`, `pjmedia_get_vid_subsys`, etc.) and Windows API functions (`WTSRegisterSessionNotification`, `WTSUnRegisterSessionNotification`)**
+    * **Root Cause A (Video):** Embora as bibliotecas PJSIP relacionadas a vídeo estivessem sendo compiladas e linkadas (`pjmedia.lib`, `pjmedia-videodev.lib`), o MicroSIP não estava compilando o código que utilizava essas funções devido à ausência da macro `_GLOBAL_VIDEO`.
+    * **Solution A:** Added `_GLOBAL_VIDEO` to the `PreprocessorDefinitions` in `microsip.vcxproj` via `patch_microsip_vcxproj.ps1`. This ensures que o código de vídeo no MicroSIP é incluído na compilação.
+    * **Root Cause B (Windows API):** As funções `WTSRegisterSessionNotification` e `WTSUnRegisterSessionNotification` são APIs do Windows que exigem a biblioteca `Wtsapi32.lib`, que estava faltando na lista de dependências.
+    * **Solution B:** Added `Wtsapi32.lib` to the `windowsCommonLibs` list in `patch_microsip_vcxproj.ps1` to ensure it's linked.
+
+* **Problem 4: `LINK : warning LNK4098: defaultlib 'MSVCRT' conflicts with use of other libs; use /NODEFAULTLIB:library` and `__imp__stricmp` unresolved**
+    * **Root Cause:** Isso é um conflito da C Runtime Library (CRT). O PJSIP foi compilado com a versão `MultiThreadedDLL` (`/MD`) da CRT, enquanto o MicroSIP (por padrão ou configuração anterior) estava tentando usar a versão `MultiThreaded` (`/MT`) da CRT. Misturar essas configurações no mesmo executável causa problemas de linkagem.
+    * **Solution:** Modified `patch_microsip_vcxproj.ps1` to explicitly set the `RuntimeLibrary` for MicroSIP to `MultiThreadedDLL` (`/MD`), alinhando-o com a forma como o PJSIP é compilado.
 
 ## Usage with GitHub Actions
 

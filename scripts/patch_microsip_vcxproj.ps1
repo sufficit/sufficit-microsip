@@ -2,8 +2,8 @@
 # PATCH SCRIPT FOR MicroSIP PROJECT FILE (CALLED BY GITHUB ACTIONS WORKFLOW)
 #
 # Author: Hugo Castro de Deco, Sufficit, and Gemini AI for Google
-# Date: June 18, 2025 - 02:10:00 AM -03
-# Version: 1.0.78
+# Date: June 18, 2025 - 02:20:00 AM -03
+# Version: 1.0.79
 #
 # This script configures MicroSIP's vcxproj to link with PJSIP libraries.
 #
@@ -15,8 +15,9 @@
 #   - Explicitly defines all required PJSIP libraries in AdditionalDependencies.
 #   - Adds `/NODEFAULTLIB:libpjproject-x86_64-x64-vc14-Release-Static.lib` to
 #     Linker->AdditionalOptions as a fallback.
-#   - FIXED: Added 'Wtsapi32.lib' to AdditionalDependencies for WTSRegisterSessionNotification.
-#   - FIXED: Ensured /MD (Multi-threaded DLL) runtime library setting for MicroSIP to match PJSIP.
+#   - Fixed: Added 'Wtsapi32.lib' to AdditionalDependencies for WTSRegisterSessionNotification.
+#   - Fixed: Ensured /MD (Multi-threaded DLL) runtime library setting for MicroSIP to match PJSIP.
+#   - NEW: Added '_AFXDLL' to PreprocessorDefinitions to resolve C1189 MFC error when using /MD.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -142,11 +143,11 @@ $(Configuration)|$(Platform)'=='Release|x64'
         "_UNICODE",
         "UNICODE",
         "PJMEDIA_AUD_MAX_DEVS=4", # Explicitly define this macro
-        "_GLOBAL_VIDEO" # Ensure video compilation is enabled in MicroSIP
+        "_GLOBAL_VIDEO", # Ensure video compilation is enabled in MicroSIP
+        "_AFXDLL" # NEW: Required when using MFC with /MD runtime library
     )
 
     # Combine existing unique definitions with required ones, and remove any duplicates
-    $updatedDefinitions = ($existingList + $requiredDefinitions) | Select-Object -Unique
     $preprocessorDefinitionsNode.InnerText = ($updatedDefinitions | Where-Object { $_ -ne "" }) -join ';'
     Write-Host "Set PreprocessorDefinitions in $ProjFile to: $($preprocessorDefinitionsNode.InnerText)"
 
