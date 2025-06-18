@@ -3,8 +3,8 @@
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 18, 2025 - 01:25:00 AM -03
-# Version: 1.0.75
+# Date: June 18, 2025 - 01:45:00 AM -03
+# Version: 1.0.76
 #
 # This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
@@ -19,8 +19,6 @@
 #   - Removed the `%(AdditionalIncludeDirectories)` and `%(AdditionalLibraryDirectories)` placeholders
 #     from the final XML output strings for absolute control over build paths, as all necessary
 #     paths are now explicitly listed.
-#   - ADDED: Explicitly removes any existing <AdditionalDependencies> nodes that might contain
-#     the old 'libpjproject-x86_64-x64-vc14-Release-Static.lib' reference to prevent LNK1104.
 #   - ADDED: Version and timestamp to script header for traceability.
 #   - FIXED: Corrected the handling of `$(LibraryPath)` in AdditionalLibraryDirectories to ensure
 #     it's passed as an MSBuild macro, not a PowerShell variable. This was the root cause of
@@ -28,10 +26,11 @@
 #   - FIXED: Added 'PJMEDIA_AUD_MAX_DEVS=4' to PreprocessorDefinitions in microsip.vcxproj to resolve
 #     'undeclared identifier' errors.
 #   - FIXED: Enhanced handling of `AdditionalDependencies` to explicitly remove existing nodes
-#     before adding the new set, preventing leftover old library references (like LNK1104 for `libpjproject-x86_64-x64-vc14-Release-Static.lib`).
-#   - NEW: Implemented a more aggressive string replacement for the problematic library name
-#     (`libpjproject-x86_64-x64-vc14-Release-Static.lib`) across all <Link> and <ClCompile> nodes,
-#     targeting common options where it might implicitly appear (e.g., AdditionalOptions).
+#     before adding the new set, preventing leftover old library references.
+#   - NEW: Implemented an aggressive string replacement for the problematic library name
+#     (`libpjproject-x86_64-x64-vc14-Release-Static.lib`) across the entire `.vcxproj` file
+#     as plain text, as a preliminary step before XML parsing. This is a "force brute"
+#     approach to ensure it's removed wherever it might appear, even in unexpected places.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -50,6 +49,22 @@ Write-Host "PjsipLibRoot received: $PjsipLibRoot"
 Write-Host "PjsipAppsIncludePath received: $PjsipAppsIncludePath"
 
 try {
+    # AGGRESSIVE PRE-PROCESSING: Remove problematic library name as plain text first
+    # This addresses cases where the string might be in unexpected XML attributes or parts
+    # not easily targeted by XPath or InnerText.
+    $oldProblematicLibName = "libpjproject-x86_64-x64-vc14-Release-Static.lib"
+    Write-Host "Attempting aggressive text replacement for '$oldProblematicLibName' in $ProjFile..."
+    $fileContent = Get-Content $ProjFile -Raw
+    if ($fileContent -like "*$oldProblematicLibName*") {
+        $fileContent = $fileContent.Replace($oldProblematicLibName, "")
+        $fileContent = $fileContent.Replace(";;", ";").Trim(';') # Clean up double semicolons
+        Set-Content $ProjFile -Value $fileContent -Encoding UTF8 # Ensure UTF8 encoding
+        Write-Host "Aggressive text replacement successful for '$oldProblematicLibName'."
+    } else {
+        Write-Host "Aggressive text replacement: '$oldProblematicLibName' not found (expected)."
+    }
+
+    # Now, proceed with XML parsing and structured updates
     [xml]$projXml = Get-Content $ProjFile
 
     $nsManager = New-Object System.Xml.XmlNamespaceManager($projXml.NameTable)
@@ -189,30 +204,13 @@ try {
     $additionalDependenciesNode.InnerText = ($pjsipLibs + $windowsCommonLibs | Select-Object -Unique) -join ';'
     Write-Host "Set AdditionalDependencies in $ProjFile to: $($additionalDependenciesNode.InnerText)"
 
-    # NEW AGGRESSIVE REMOVAL: Search and replace the problematic library name directly in the XML string content
-    # This targets any node text where the old library name might appear, including AdditionalOptions.
-    $oldProblematicLibName = "libpjproject-x86_64-x64-vc14-Release-Static.lib"
-    
-    $nodesToClean = $itemDefinitionGroupNode.SelectNodes(".//msbuild:*", $nsManager) # Select all child nodes recursively
-    $changesMade = $false
-
-    foreach ($node in $nodesToClean) {
-        if ($node.NodeType -eq [System.Xml.XmlNodeType]::Element -and -not [string]::IsNullOrEmpty($node.InnerText)) {
-            if ($node.InnerText -like "*$oldProblematicLibName*") {
-                Write-Host "Found '$oldProblematicLibName' in node <$($node.Name)> with current value: '$($node.InnerText)'"
-                # Replace the old library name with an empty string
-                $node.InnerText = $node.InnerText.Replace($oldProblematicLibName, "").Replace(";;", ";").Trim(';')
-                $changesMade = $true
-                Write-Host "Updated node <$($node.Name)> to: '$($node.InnerText)'"
-            }
-        }
-    }
-    if ($changesMade) {
-        Write-Host "Cleaned up references to '$oldProblematicLibName' in various nodes."
-    } else {
-        Write-Host "No direct references to '$oldProblematicLibName' found in accessible nodes (expected)."
-    }
-
+    # The previous explicit removal of "libpjproject-x86_64-x64-vc14-Release-Static.lib" is now largely redundant
+    # because we are overwriting the entire InnerText content. Keeping it commented for reference.
+    # $oldPjsipLibNodes = $linkerNode.SelectNodes("child::*[normalize-space(.)='libpjproject-x86_64-x64-vc14-Release-Static.lib']", $nsManager)
+    # foreach ($oldNode in $oldPjsipLibNodes) {
+    #     Write-Host "Removing old PJSIP static library reference (now redundant): $($oldNode.'#text')"
+    #     $oldNode.ParentNode.RemoveChild($oldNode)
+    # }
 
     $projXml.Save($ProjFile)
     Write-Host "Successfully patched $ProjFile."
