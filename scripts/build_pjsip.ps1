@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 18, 2025
-# Version: 3 (Added explicit null/empty check for $baseProjectName before Hashtable lookup)
+# Version: 4 (Modified Hashtable lookup to avoid ContainsKey, and added null/empty checks for robust parsing.)
 #
 # This script builds the PJSIP solution using MSBuild, ensuring the correct configuration
 # and platform are applied.
@@ -165,8 +165,8 @@ try {
 
         # Determine target name based on mapping or fallback to actual file name
         $targetLibName = $null
-        # This is line 144 in the temporary script where the "Value cannot be null" error occurred
-        if ($libRenames.ContainsKey($baseProjectName)) { 
+        # REVISED LOGIC: Check if the key exists by attempting to retrieve it, then check if the result is not null.
+        if ($null -ne $libRenames[$baseProjectName]) { 
             $targetLibName = $libRenames[$baseProjectName]
             Write-Host "DEBUG: Found rename mapping for base project name '$($baseProjectName)'. Target name: '$targetLibName'."
         } else {
