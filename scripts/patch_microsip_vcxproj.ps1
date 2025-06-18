@@ -3,8 +3,8 @@
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 18, 2025 - 00:35:00 AM -03
-# Version: 1.0.71
+# Date: June 18, 2025 - 00:45:00 AM -03
+# Version: 1.0.72
 #
 # This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
@@ -25,6 +25,8 @@
 #   - FIXED: Corrected the handling of `$(LibraryPath)` in AdditionalLibraryDirectories to ensure
 #     it's passed as an MSBuild macro, not a PowerShell variable. This was the root cause of
 #     "The term 'LibraryPath' is not recognized" error.
+#   - FIXED: Added 'PJMEDIA_AUD_MAX_DEVS=4' to PreprocessorDefinitions in microsip.vcxproj to resolve
+#     'undeclared identifier' errors.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -84,6 +86,30 @@ try {
     # Join paths with semicolon. Removed %(AdditionalIncludeDirectories) for absolute control.
     $additionalIncludeDirsNode.'#text' = ($includePaths | Select-Object -Unique) -join ';'
     Write-Host "Set AdditionalIncludeDirectories in $ProjFile to: $($additionalIncludeDirsNode.'#text')"
+
+    # --- Patching Preprocessor Definitions ---
+    $preprocessorDefinitionsNode = $clCompileNode.SelectSingleNode("./msbuild:PreprocessorDefinitions", $nsManager)
+    if (-not $preprocessorDefinitionsNode) {
+        $preprocessorDefinitionsNode = $projXml.CreateElement("PreprocessorDefinitions", $nsManager.LookupNamespace("msbuild"))
+        $clCompileNode.AppendChild($preprocessorDefinitionsNode)
+    }
+
+    # Ensure PJMEDIA_AUD_MAX_DEVS is defined, along with other common definitions
+    $currentDefinitions = $preprocessorDefinitionsNode.'#text'
+    $requiredDefinitions = @(
+        "WIN32",
+        "_WINDOWS",
+        "NDEBUG",
+        "_UNICODE",
+        "UNICODE",
+        "PJMEDIA_AUD_MAX_DEVS=4" # Explicitly define this macro
+    )
+
+    # Filter out existing duplicates and add new ones
+    $updatedDefinitions = ($currentDefinitions.Split(';') | Where-Object { $_ -ne "" }) + $requiredDefinitions | Select-Object -Unique
+    $preprocessorDefinitionsNode.'#text' = ($updatedDefinitions | Where-Object { $_ -ne "" }) -join ';'
+    Write-Host "Set PreprocessorDefinitions in $ProjFile to: $($preprocessorDefinitionsNode.'#text')"
+
 
     # --- Patching Library Paths and Dependencies ---
     $linkerNode = $itemDefinitionGroupNode.SelectSingleNode("./msbuild:Link", $nsManager)
