@@ -3,8 +3,8 @@
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 18, 2025 - 00:35:00 AM -03
-# Version: 1.0.72
+# Date: June 16, 2025 (Adjusted: June 17, 2025 - UTC)
+# Version: 8 (Improved error handling for release tag, Renamed opus.lib to libopus.lib)
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
@@ -15,16 +15,6 @@
 #   - Renamed 'opus.lib' to 'libopus.lib' during copy operation to match linker's expectation,
 #     resolving LNK1181 error.
 #   - Minor refactor of variable names for clarity.
-# Changes in Version 9:
-#   - Updated version and timestamp in script header.
-# Changes in Version 1.0.70:
-#   - FIXED: Corrected ARTIFACT_PREFIX and modified logic to correctly construct the expected
-#     artifact name from the release tag, removing the redundant "-build" string which caused
-#     the artifact not to be found during download.
-# Changes in Version 1.0.72:
-#   - FIXED: Further refined the logic for constructing the expected artifact name to reliably
-#     extract the date-time part from the release tag, accommodating variations like "build-".
-#     This ensures that the script correctly matches the artifact name on GitHub releases.
 # =================================================================================================
 
 # Enforce stricter parsing and error handling
@@ -33,113 +23,127 @@ $ErrorActionPreference = "Stop"
 
 $REPO_OWNER="sufficit"
 $REPO_NAME="opus"
-# This base name should match the fixed part of your Windows Opus artifact name before the date/time.
-$ARTIFACT_BASE_NAME="opus-windows-x64" 
+$ARTIFACT_PREFIX="opus-windows-x64"
 $ARTIFACT_EXT=".zip"
 
 # Use the GH_PAT environment variable directly
 $authToken = $env:GH_PAT
 
+# Headers for authenticated requests
+$headers = @{}
+if (-not [string]::IsNullOrEmpty($authToken)) {
+    $headers.Add("Authorization", "token $authToken")
+}
+
 Write-Host "Fetching latest release tag from https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+try {
+    $LATEST_RELEASE_DATA = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" -Headers $headers -ErrorAction Stop
+
+    # --- START: NEW ROBUSTNESS CHECKS ---
+    if ($null -eq $LATEST_RELEASE_DATA) {
+        throw "Failed to retrieve latest release information. The GitHub API call returned null."
+    }
+    if ([string]::IsNullOrEmpty($LATEST_RELEASE_DATA.tag_name)) {
+        throw "Could not find 'tag_name' property in the latest release API response from GitHub. Response might be malformed or no releases exist for ${REPO_OWNER}/${REPO_NAME}."
+    }
+    # --- END: NEW ROBUSTNESS CHECKS ---
+
+    $LATEST_RELEASE_TAG = $LATEST_RELEASE_DATA.tag_name
+    Write-Host "Found latest Opus release tag: $LATEST_RELEASE_TAG"
+}
+catch {
+    throw "Erro ao obter o último lançamento do Opus: $($_.Exception.Message)"
+}
+
+# Construct expected artifact name based on convention (e.g., opus-windows-x64-20250616-164541.zip)
+# We assume the release asset name directly corresponds to the release tag's date-time part
+# or can be derived predictably. For example, if tag is "build-20250616-164541", then artifact is "opus-windows-x64-20250616-164541.zip"
+$RELEASE_DATE_PART = $LATEST_RELEASE_TAG -replace "build-", ""
+$EXPECTED_ARTIFACT_NAME = "${ARTIFACT_PREFIX}-${RELEASE_DATE_PART}${ARTIFACT_EXT}"
+Write-Host "Expected artifact name: $EXPECTED_ARTIFACT_NAME"
+
+# Find the download URL for the specific artifact
+$DOWNLOAD_URL = $null
+foreach ($asset in $LATEST_RELEASE_DATA.assets) {
+    if ($asset.name -eq $EXPECTED_ARTIFACT_NAME) {
+        $DOWNLOAD_URL = $asset.browser_download_url
+        break
+    }
+}
+
+if (-not $DOWNLOAD_URL) {
+    throw "Não foi possível encontrar o artefato '${EXPECTED_ARTIFACT_NAME}' no último lançamento do ${REPO_OWNER}/${REPO_NAME}. Artefatos disponíveis: $($LATEST_RELEASE_DATA.assets.name -join ', ')"
+}
+
+Write-Host "Downloading Opus artifact from: $DOWNLOAD_URL"
+
+# Paths are relative to the current working directory, which is external/pjproject during this step (Step 4 of workflow)
+$tempDownloadDir = "external_libs/opus_temp"
+$zipFilePath = Join-Path -Path $tempDownloadDir -ChildPath $EXPECTED_ARTIFACT_NAME
+
+# Create temporary directory for download and extraction
+New-Item -ItemType Directory -Path $tempDownloadDir -Force | Out-Null
 
 try {
-    $headers = @{}
-    if ($authToken) {
-        $headers.Add("Authorization", "token $authToken")
-    }
-
-    $LATEST_RELEASE_DATA = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" -Headers $headers -ErrorAction Stop
-    
-    if (-not $LATEST_RELEASE_DATA -or -not $LATEST_RELEASE_DATA.tag_name) {
-        throw "Could not retrieve the latest release tag from GitHub API or API response was invalid."
-    }
-    $LATEST_RELEASE_TAG = $LATEST_RELEASE_DATA.tag_name
-
-    Write-Host "Found latest Opus release tag: ${LATEST_RELEASE_TAG}"
-
-    # Extract just the date-time part from the tag_name, regardless of prefix.
-    # This regex looks for YYYYMMDD-HHMMSS at the end of the tag.
-    if ($LATEST_RELEASE_TAG -match '(\d{8}-\d{6})$') {
-        $dateTimePart = $matches[1]
-    } else {
-        # Fallback if the date-time part is not exactly as expected, try to use the whole tag
-        Write-Warning "Could not parse specific date-time part from tag '${LATEST_RELEASE_TAG}'. Using full tag as part of artifact name."
-        $dateTimePart = $LATEST_RELEASE_TAG -replace "build-", "" # Still remove "build-" if it exists
-    }
-
-    $expectedArtifactName = "${ARTIFACT_BASE_NAME}-${dateTimePart}${ARTIFACT_EXT}"
-    Write-Host "Constructed expected artifact name: ${expectedArtifactName}"
-
-    # Filter assets to find the specific zip file
-    $downloadUrl = $null
-    foreach ($asset in $LATEST_RELEASE_DATA.assets) {
-        if ($asset.name -eq $expectedArtifactName) {
-            $downloadUrl = $asset.browser_download_url
-            break
-        }
-    }
-
-    if (-not $downloadUrl) {
-        throw "Could not find the expected artifact '${expectedArtifactName}' in the latest release. Available assets: $($LATEST_RELEASE_DATA.assets.name -join ', ')"
-    }
-
-    $tempDownloadDir = "external_libs/opus_temp"
-    New-Item -ItemType Directory -Path $tempDownloadDir -Force | Out-Null
-
-    $tempZipFile = Join-Path -Path $tempDownloadDir -ChildPath $expectedArtifactName
-
-    Write-Host "Downloading Opus artifact from: ${downloadUrl}"
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZipFile -Headers $headers
-
-    Write-Host "Extracting ${tempZipFile} to ${tempDownloadDir}"
-    Expand-Archive -Path $tempZipFile -DestinationPath $tempDownloadDir -Force
-
-    Write-Host "--- Contents of ${tempDownloadDir} after extraction (for debugging) ---"
-    Get-ChildItem -Path $tempDownloadDir -Recurse | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
-    Write-Host "-----------------------------------------------------------------"
-
-    $pjLibDir = Join-Path -Path (Get-Location) -ChildPath "lib" # Relative to external/pjproject
-    New-Item -ItemType Directory -Path $pjLibDir -Force | Out-Null
-
-    $pjIncludeOpusDir = Join-Path -Path (Get-Location) -ChildPath "pjlib/include/pj/opus"
-    New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force | Out-Null
-
-    # Find opus.lib (it might be in a subdirectory like 'dist_windows/bin')
-    Write-Host "Searching for opus.lib in extracted contents..."
-    $foundOpusLib = Get-ChildItem -Path $tempDownloadDir -Filter "opus.lib" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-
-    if ($null -ne $foundOpusLib) {
-        $destinationFileName = "libopus.lib" # Rename to libopus.lib as MicroSIP expects
-        $destinationPath = Join-Path -Path $pjLibDir -ChildPath $destinationFileName
-        Copy-Item -Path $foundOpusLib.FullName -Destination $destinationPath -Force
-        Write-Host "Copied $($foundOpusLib.Name) from $($foundOpusLib.FullName) to ${destinationPath} (renamed to ${destinationFileName})"
-    } else {
-        throw "opus.lib não encontrado dentro do conteúdo extraído do lançamento Opus (${tempDownloadDir}). Por favor, verifique a estrutura do artefato."
-    }
-
-    # Copy Opus headers to PJSIP's pjlib/include/pj/opus directory
-    New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force | Out-Null
-
-    Write-Host "Attempting broad recursive search for Opus headers (*.h) in '${tempDownloadDir}' and its subdirectories..."
-    $foundOpusHeaders = Get-ChildItem -Path $tempDownloadDir -Filter "*.h" -Recurse
-
-    if ($null -ne $foundOpusHeaders -and $foundOpusHeaders.Count -gt 0) {
-        foreach ($headerFile in $foundOpusHeaders) {
-            Copy-Item -Path $headerFile.FullName -Destination $pjIncludeOpusDir -Force
-            Write-Host "Copied header: $($headerFile.FullName) to ${pjIncludeOpusDir}"
-        }
-        Write-Host "Successfully copied $($foundOpusHeaders.Count) Opus header files."
-    } else {
-        Write-Warning "Nenhum arquivo de cabeçalho Opus (*.h) encontrado dentro do conteúdo extraído de ${tempDownloadDir}. Verifique se o pacote Opus contém os cabeçalhos."
-    }
-
-    # Clean up temporary directory
-    Write-Host "Cleaning up temporary directory: ${tempDownloadDir}"
-    Remove-Item -Path $tempDownloadDir -Recurse -Force
-
-    Write-Host "Opus library and header processing completed."
-
-} catch {
-    Write-Host "##[error]Error downloading/preparing Opus: $($_.Exception.Message)"
-    exit 1
+    Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $zipFilePath -Headers $headers -ErrorAction Stop
 }
+catch {
+    throw "Erro ao baixar o artefato Opus de ${DOWNLOAD_URL}: $($_.Exception.Message)"
+}
+
+Write-Host "Extracting ${zipFilePath} to ${tempDownloadDir}"
+try {
+    Expand-Archive -Path $zipFilePath -DestinationPath $tempDownloadDir -Force
+}
+catch {
+    throw "Erro ao extrair o artefato Opus de ${zipFilePath}: $($_.Exception.Message)"
+}
+
+Write-Host "--- Contents of ${tempDownloadDir} after extraction (for debugging) ---"
+Get-ChildItem -Path $tempDownloadDir -Recurse | Select-Object FullName
+Write-Host "-----------------------------------------------------------------"
+
+# Define target directories relative to the current PJSIP directory
+$pjsipLibDir = "lib" # PJSIP's default lib directory for build outputs
+$pjIncludeOpusDir = "pjlib/include/pj/opus" # PJSIP's include path for Opus headers
+
+# Create the PJSIP lib directory if it doesn't exist
+New-Item -ItemType Directory -Path $pjsipLibDir -Force | Out-Null
+
+# Find opus.lib and copy it to PJSIP's lib directory, renaming it to libopus.lib
+Write-Host "Searching for opus.lib in extracted contents..."
+# Search recursively for opus.lib within the extracted contents
+$foundOpusLib = Get-ChildItem -Path $tempDownloadDir -Filter "opus.lib" -Recurse | Select-Object -First 1
+
+if ($null -ne $foundOpusLib) {
+    # Define the new name for the copied Opus library to match linker's expectation
+    $destinationFileName = "libopus.lib"
+    $destinationPath = Join-Path -Path $pjsipLibDir -ChildPath $destinationFileName
+
+    Copy-Item -Path $foundOpusLib.FullName -Destination $destinationPath -Force
+    Write-Host "Copied $($foundOpusLib.Name) from $($foundOpusLib.FullName) to ${destinationPath} (renamed to ${destinationFileName})"
+} else {
+    throw "opus.lib não encontrado dentro do conteúdo extraído do lançamento Opus (${tempDownloadDir}). Por favor, verifique a estrutura do artefato."
+}
+
+# Copy Opus headers to PJSIP's pjlib/include/pj/opus directory
+New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force | Out-Null
+
+Write-Host "Attempting broad recursive search for Opus headers (*.h) in '${tempDownloadDir}' and its subdirectories..."
+$foundOpusHeaders = Get-ChildItem -Path $tempDownloadDir -Filter "*.h" -Recurse
+
+if ($null -ne $foundOpusHeaders -and $foundOpusHeaders.Count -gt 0) {
+    foreach ($headerFile in $foundOpusHeaders) {
+        Copy-Item -Path $headerFile.FullName -Destination $pjIncludeOpusDir -Force
+        Write-Host "Copied header: $($headerFile.FullName) to ${pjIncludeOpusDir}"
+    }
+    Write-Host "Successfully copied $($foundOpusHeaders.Count) Opus header files."
+} else {
+    Write-Warning "Nenhum arquivo de cabeçalho Opus (*.h) encontrado dentro do conteúdo extraído de ${tempDownloadDir}. Verifique se o pacote Opus contém os cabeçalhos."
+}
+
+# Clean up temporary directory
+Write-Host "Cleaning up temporary directory: ${tempDownloadDir}"
+Remove-Item -Path $tempDownloadDir -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
+
+Write-Host "Opus library and header processing completed."
