@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 18, 2025
-# Version: 2 (Added debug logging for $baseProjectName issue)
+# Version: 3 (Added explicit null/empty check for $baseProjectName before Hashtable lookup)
 #
 # This script builds the PJSIP solution using MSBuild, ensuring the correct configuration
 # and platform are applied.
@@ -101,9 +101,9 @@ try {
         $baseProjectName = [System.IO.Path]::GetFileNameWithoutExtension($projectFile).Replace('_', '-').Replace('.vcxproj', '')
         Write-Host "DEBUG: Calculated baseProjectName: '$baseProjectName'"
         
-        # Check if baseProjectName is null or empty after processing
+        # Explicitly check for null or empty baseProjectName before using it as a key
         if ([string]::IsNullOrEmpty($baseProjectName)) {
-            Write-Host "##[error]Error: Calculated baseProjectName is null or empty for projectFile '$projectFile'. This indicates an unexpected path format or processing issue."
+            Write-Host "##[error]Error: Calculated baseProjectName is null or empty for projectFile '$projectFile'. This indicates an unexpected path format or processing issue with this specific project file."
             exit 1
         }
 
@@ -165,7 +165,8 @@ try {
 
         # Determine target name based on mapping or fallback to actual file name
         $targetLibName = $null
-        if ($libRenames.ContainsKey($baseProjectName)) { # This is the line 144
+        # This is line 144 in the temporary script where the "Value cannot be null" error occurred
+        if ($libRenames.ContainsKey($baseProjectName)) { 
             $targetLibName = $libRenames[$baseProjectName]
             Write-Host "DEBUG: Found rename mapping for base project name '$($baseProjectName)'. Target name: '$targetLibName'."
         } else {
