@@ -2,8 +2,8 @@
 # PATCH SCRIPT FOR MicroSIP PROJECT FILE (CALLED BY GITHUB ACTIONS WORKFLOW)
 #
 # Author: Hugo Castro de Deco, Sufficit, and Gemini AI for Google
-# Date: June 18, 2025 - 02:20:00 AM -03
-# Version: 1.0.79
+# Date: June 18, 2025 - 02:25:00 AM -03
+# Version: 1.0.80
 #
 # This script configures MicroSIP's vcxproj to link with PJSIP libraries.
 #
@@ -148,7 +148,7 @@ $(Configuration)|$(Platform)'=='Release|x64'
     )
 
     # Combine existing unique definitions with required ones, and remove any duplicates
-    $preprocessorDefinitionsNode.InnerText = ($updatedDefinitions | Where-Object { $_ -ne "" }) -join ';'
+    $preprocessorDefinitionsNode.InnerText = ($existingList + $requiredDefinitions | Select-Object -Unique) -join ';'
     Write-Host "Set PreprocessorDefinitions in $ProjFile to: $($preprocessorDefinitionsNode.InnerText)"
 
 
