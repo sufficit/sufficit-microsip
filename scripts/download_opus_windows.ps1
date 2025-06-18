@@ -3,8 +3,8 @@
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 18, 2025 - 12:10:00 AM -03
-# Version: 9 (Updated version and timestamp)
+# Date: June 18, 2025 - 00:25:00 AM -03
+# Version: 1.0.70
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
@@ -17,6 +17,9 @@
 #   - Minor refactor of variable names for clarity.
 # Changes in Version 9:
 #   - Updated version and timestamp in script header.
+# Changes in Version 1.0.70:
+#   - FIXED: Corrected ARTIFACT_PREFIX to match the actual naming convention of Opus releases,
+#     removing the redundant "-build" string which caused the artifact not to be found.
 # =================================================================================================
 
 # Enforce stricter parsing and error handling
@@ -25,7 +28,8 @@ $ErrorActionPreference = "Stop"
 
 $REPO_OWNER="sufficit"
 $REPO_NAME="opus"
-$ARTIFACT_PREFIX="opus-windows-x64"
+# FIXED: Removed "-build" from ARTIFACT_PREFIX to match actual release asset names
+$ARTIFACT_PREFIX="opus-windows-x64" 
 $ARTIFACT_EXT=".zip"
 
 # Use the GH_PAT environment variable directly
@@ -48,7 +52,10 @@ try {
 
     Write-Host "Found latest Opus release tag: ${LATEST_RELEASE_TAG}"
 
-    $expectedArtifactName = "${ARTIFACT_PREFIX}-${LATEST_RELEASE_TAG}.zip"
+    # The tag might be "build-20250616-164541", but the asset name doesn't include "build-"
+    # We need to construct the expected artifact name correctly.
+    $cleanedTagForArtifact = $LATEST_RELEASE_TAG -replace "build-", ""
+    $expectedArtifactName = "${ARTIFACT_PREFIX}-${cleanedTagForArtifact}.zip"
     Write-Host "Expected artifact name: ${expectedArtifactName}"
 
     # Filter assets to find the specific zip file

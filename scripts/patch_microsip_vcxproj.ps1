@@ -10,7 +10,7 @@
 #
 # Changes:
 #   - FIXED: Explicitly *replaces* `AdditionalLibraryDirectories` and `AdditionalDependencies`
-#     with precisely controlled absolute paths and libraries. This eliminates potential conflicts
+#     con precisely controlled absolute paths and libraries. This eliminates potential conflicts
 #     from existing relative paths or implicit default behaviors in the .vcxproj, addressing
 #     persistent LNK1181 errors.
 #   - FIXED: Corrected PowerShell parsing error "No characters are allowed after a here-string header".
