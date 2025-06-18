@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.67
-# Last Updated: 2025-06-18 10:58:52 AM -03 (Corrected artifact upload paths and added PJMEDIA_HAS_VIDEO)
+# Action Version: 1.0.67 (Updated to execute build_pjsip.ps1 correctly and refined artifact paths)
+# Last Updated: 2025-06-18 11:26:00 AM -03
 # =================================================================================================
 
 name: C++ Build
@@ -96,14 +96,12 @@ jobs:
 
           # Download and prepare Opus libraries for PJSIP
           Write-Host "Executing scripts/download_opus_windows.ps1 for PJSIP (via temporary file)..."
-          $scriptPath = "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1"
-          $tempScriptPath = "temp_download_opus.ps1"
-
-          $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8
+          $scriptPathOpus = "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1"
+          $tempScriptPathOpus = "temp_download_opus.ps1"
+          $scriptContentOpus = Get-Content $scriptPathOpus -Raw -Encoding UTF8
           $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
-          Set-Content -Path $tempScriptPath -Value $scriptContent -Encoding $utf8NoBomEncoding
-
-          pwsh -File $tempScriptPath
+          Set-Content -Path $tempScriptPathOpus -Value $scriptContentOpus -Encoding $utf8NoBomEncoding
+          pwsh -File $tempScriptPathOpus
           Write-Host "Scripts/download_opus_windows.ps1 completed."
 
           # Copy PJSIP configuration files
@@ -112,142 +110,16 @@ jobs:
           Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
           Write-Host "PJSIP configuration files copied."
 
-          # Compile essential PJSIP projects
-          Write-Host "Compiling essential PJSIP projects..."
-          $pjsipProjectsToBuild = @(
-              "pjlib/build/pjlib.vcxproj",
-              "pjlib-util/build/pjlib_util.vcxproj",
-              "pjnath/build/pjnath.vcxproj",
-              "pjmedia/build/pjmedia.vcxproj",
-              "pjmedia/build/pjmedia_audiodev.vcxproj",
-              "pjmedia/build/pjmedia_codec.vcxproj",
-              "pjmedia/build/pjmedia_videodev.vcxproj",
-              "pjsip/build/pjsip_core.vcxproj",
-              "pjsip/build/pjsip_simple.vcxproj",
-              "pjsip/build/pjsip_ua.vcxproj",
-              "pjsip/build/pjsua_lib.vcxproj",
-              "pjsip/build/pjsua2_lib.vcxproj",
-              "third_party/build/baseclasses/libbaseclasses.vcxproj",
-              "third_party/build/g7221/libg7221codec.vcxproj",
-              "third_party/build/gsm/libgsmcodec.vcxproj",
-              "third_party/build/ilbc/libilbccodec.vcxproj",
-              "third_party/build/milenage/libmilenage.vcxproj",
-              "third_party/build/resample/libresample.vcxproj",
-              "third_party/build/speex/libspeex.vcxproj",
-              "third_party/build/srtp/libsrtp.vcxproj",
-              "third_party/build/webrtc/libwebrtc.vcxproj",
-              "third_party/build/yuv/libyuv.vcxproj"
-          )
+          # --- NEW PART FOR EXECUTING build_pjsip.ps1 ---
+          # Execute build_pjsip.ps1 dynamically from the checked out repository
+          Write-Host "Executing build_pjsip.ps1 for PJSIP (via temporary file)..."
+          $scriptPathPjsip = "$env:GITHUB_WORKSPACE/scripts/build_pjsip.ps1"
+          $tempScriptPathPjsip = "temp_build_pjsip.ps1"
+          $scriptContentPjsip = Get-Content $scriptPathPjsip -Raw -Encoding UTF8
+          Set-Content -Path $tempScriptPathPjsip -Value $scriptContentPjsip -Encoding $utf8NoBomEncoding
+          pwsh -File $tempScriptPathPjsip # Execute the PJSIP build script
 
-          # Mapping of base project names (from vcxproj, normalized) to desired simple names.
-          # The keys here are the base name of the project, standardized to hyphens if original has them,
-          # or the simple name if no hyphen/underscore issue.
-          # The values are the final names that MicroSIP expects.
-          # Opus is already handled separately.
-          $libRenames = @{
-              "pjlib" = "pjlib.lib";
-              "pjlib-util" = "pjlib-util.lib"; # pjlib_util.vcxproj -> pjlib-util.lib
-              "pjnath" = "pjnath.lib";
-              "pjmedia" = "pjmedia.lib";
-              "pjmedia-audiodev" = "pjmedia-audiodev.lib";
-              "pjmedia-codec" = "pjmedia-codec.lib";
-              "pjmedia-videodev" = "pjmedia-videodev.lib";
-              "pjsip-core" = "pjsip-core.lib";
-              "pjsip-simple" = "pjsip-simple.lib";
-              "pjsip-ua" = "pjsip-ua.lib";
-              "pjsua-lib" = "pjsua-lib.lib";
-              "pjsua2-lib" = "pjsua2-lib.lib";
-              "libbaseclasses" = "libbaseclasses.lib";
-              "libg7221codec" = "libg7221codec.lib";
-              "libgsmcodec" = "libgsmcodec.lib";
-              "libilbccodec" = "libilbccodec.lib";
-              "libmilenage" = "libmilenage.lib";
-              "libresample" = "libresample.lib";
-              "libspeex" = "libspeex.lib";
-              "libsrtp" = "libsrtp.lib";
-              "libwebrtc" = "libwebrtc.lib";
-              "libyuv" = "libyuv.lib"
-          }
-
-          foreach ($projectFile in $pjsipProjectsToBuild) {
-              $fullProjectPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/$projectFile"
-              Write-Host "Compiling project: $fullProjectPath"
-              
-              $rawMsbuildOutput = & msbuild.exe "$fullProjectPath" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild /p:ExcludeRestorePackageFolders=true /nologo
-              Write-Host ($rawMsbuildOutput | Out-String)
-
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Host "##[error]PJSIP project compilation failed for $projectFile."
-                  exit 1
-              }
-              
-              $actualOutputLibPath = $null
-              foreach ($line in $rawMsbuildOutput) {
-                  if ($line -match "(?i)\.vcxproj -> (.*\.lib)") {
-                      $match = $matches[1]
-                      $actualOutputLibPath = $match.Trim()
-                      Write-Host "DEBUG: Extracted actual output .lib path: $actualOutputLibPath"
-                      break
-                  }
-              }
-
-              if ($null -eq $actualOutputLibPath) {
-                  Write-Host "##[error]Error: Could not determine actual output .lib path from MSBuild log for $projectFile. Failing workflow."
-                  exit 1
-              }
-              
-              $sourceLibPath = $actualOutputLibPath
-              $actualLibFileName = [System.IO.Path]::GetFileName($sourceLibPath) # e.g., pjlib_util-x86_64-x64-vc14-Release.lib
-              
-              Write-Host "Contents of source directory of '$actualLibFileName':"
-              Get-ChildItem -Path (Split-Path -Path $sourceLibPath -Parent) -ErrorAction SilentlyContinue | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
-              Write-Host "--------------------------------------------------------"
-
-              $foundLibFile = $null
-              $maxRetries = 5
-              $retryDelaySec = 2
-
-              # Wait for the .lib file to exist at the *exact* path reported by MSBuild
-              for ($i = 0; $i -lt $maxRetries; $i++) {
-                  Write-Host "Attempting to find freshly compiled library '$($actualLibFileName)' at '$($sourceLibPath)' (Attempt $($i + 1)/$maxRetries)..."
-                  if (Test-Path -Path $sourceLibPath -PathType Leaf -ErrorAction SilentlyContinue) {
-                      $foundLibFile = Get-Item -Path $sourceLibPath -ErrorAction SilentlyContinue
-                      if ($null -ne $foundLibFile) {
-                          Write-Host "Found compiled file at exact path."
-                          break
-                      }
-                  }
-                  if ($i -lt ($maxRetries - 1)) {
-                      Write-Host "File not found at exact path, retrying in ${retryDelaySec} seconds..."
-                      Start-Sleep -Seconds $retryDelaySec
-                  }
-              }
-
-              # Define the central PJSIP lib directory
-              $centralPjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
-              New-Item -ItemType Directory -Path $centralPjsipLibDir -Force | Out-Null
-              
-              $targetLibName = $null
-              if ($libRenames.ContainsKey($baseProjectName)) { # Use the normalized base project name to check against the map
-                  $targetLibName = $libRenames[$baseProjectName]
-                  Write-Host "DEBUG: Found rename mapping for base project name '$($baseProjectName)'. Target name: '$targetLibName'."
-              } else {
-                  # Fallback: if no explicit rename mapping for the base project name, use the actual compiled file name.
-                  $targetLibName = $actualLibFileName
-                  Write-Host "##[warning]Warning: No specific rename mapping found for base project name '$($baseProjectName)'. Using original compiled file name as target: '$targetLibName'."
-              }
-
-              $targetLibPath = Join-Path -Path $centralPjsipLibDir -ChildPath $targetLibName
-              
-              if ($null -ne $foundLibFile) {
-                  Write-Host "Found '$($foundLibFile.Name)' at '$($foundLibFile.FullName)'. Moving to '$($targetLibPath)'."
-                  Move-Item -Path $foundLibFile.FullName -Destination $targetLibPath -Force
-              } else {
-                  Write-Host "##[error]Error: Compiled library file '$($actualLibFileName)' was reported by MSBuild but not found at '$($sourceLibPath)' after all retries for processing. Failing workflow."
-                  exit 1
-              }
-          }
-          Write-Host "PJSIP compilation completed."
+          Write-Host "PJSIP compilation step completed."
           Set-Location $env:GITHUB_WORKSPACE
           Write-Host "Returning to MicroSIP root directory: $(Get-Location)"
         shell: pwsh

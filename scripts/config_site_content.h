@@ -4,7 +4,7 @@
 // Author: Hugo Castro de Deco, Sufficit
 // Collaboration: Gemini AI for Google
 // Date: June 18, 2025
-// Version: 2 (Corrected comment block for C/C++ preprocessor compatibility)
+// Version: 2 (Corrected comment block for C/C++ preprocessor compatibility, added PJMEDIA_HAS_VIDEO)
 //
 // This file provides custom configuration definitions for PJSIP,
 // including platform-specific settings and feature flags.
