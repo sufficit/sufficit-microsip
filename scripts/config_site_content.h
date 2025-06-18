@@ -1,18 +1,15 @@
-// =================================================================================================
-// PJSIP CUSTOM CONFIGURATION FILE
-//
-// Author: Hugo Castro de Deco, Sufficit
-// Collaboration: Gemini AI for Google
-// Date: June 16, 2025
-// Version: 3
-//
-// This file provides custom configuration definitions for PJSIP,
-// including platform-specific settings and feature flags.
-//
-// Changes:
-//   - Added #ifndef guards around _WIN32_WINNT, _WIN32, and _M_X64 to prevent
-//     macro redefinition warnings (C4005).
-// =================================================================================================
+# =================================================================================================
+# PJSIP CUSTOM CONFIGURATION FILE CONTENT
+#
+# Author: Hugo Castro de Deco, Sufficit
+# Collaboration: Gemini AI for Google
+# Date: June 16, 2025
+# Version: 1
+#
+# This file provides custom configuration definitions for PJSIP,
+# including platform-specific settings and feature flags.
+# It is intended to be copied to pjlib/include/pj/config_site.h during build.
+# =================================================================================================
 
 // Define Windows version for API compatibility (e.g., for WASAPI functions)
 #ifndef _WIN32_WINNT
@@ -35,5 +32,14 @@
 #define _M_X64
 #endif
 
+// Add this line to enable PJSIP video functionalities
+#define PJMEDIA_HAS_VIDEO 1
+
+// If you are using FFmpeg for video codecs and conversion, ensure these are also enabled if not
+// already covered by PJMEDIA_HAS_VIDEO's internal dependencies or other mechanisms.
+// Based on the log, these appear to be compiled in pjmedia.vcxproj, so explicit defines might not be strictly necessary
+// but can serve as a safeguard or for clarity.
+// #define PJMEDIA_HAS_FFMPEG 1
+// #define PJMEDIA_HAS_LIBSWSCALE 1
+
 #include <pj/config_site_sample.h>
-#include <pj/pjsip_extra_defines.h> // Include the new extra defines file
