@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.66
-# Last Updated: 2025-06-17 07:25:00 PM -03 (Refactored $libRenames and matching logic for robustness)
+# Action Version: 1.0.67
+# Last Updated: 2025-06-18 12:10:00 AM -03 (Updated patch_microsip_vcxproj.ps1 version)
 # =================================================================================================
 
 name: C++ Build

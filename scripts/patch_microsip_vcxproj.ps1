@@ -3,8 +3,8 @@
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 17, 2025 - 09:00:00 PM -03
-# Version: 1.0.68
+# Date: June 18, 2025 - 12:10:00 AM -03
+# Version: 1.0.69
 #
 # This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
@@ -23,7 +23,8 @@
 #     the old 'libpjproject-x86_64-x64-vc14-Release-Static.lib' reference to prevent LNK1104.
 #   - ADDED: Version and timestamp to script header for traceability.
 #   - FIXED: Corrected the handling of `$(LibraryPath)` in AdditionalLibraryDirectories to ensure
-#     it's passed as an MSBuild macro, not a PowerShell variable.
+#     it's passed as an MSBuild macro, not a PowerShell variable. This was the root cause of
+#     "The term 'LibraryPath' is not recognized" error.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]

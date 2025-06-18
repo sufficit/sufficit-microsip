@@ -3,15 +3,17 @@
 //
 // Author: Hugo Castro de Deco, Sufficit
 // Collaboration: Gemini AI for Google
-// Date: June 16, 2025
-// Version: 3
+// Date: June 18, 2025 - 12:10:00 AM -03
+// Version: 4
 //
 // This file provides custom configuration definitions for PJSIP,
 // including platform-specific settings and feature flags.
+// It is intended to be copied to pjlib/include/pj/config_site.h during build.
 //
 // Changes:
 //   - Added #ifndef guards around _WIN32_WINNT, _WIN32, and _M_X64 to prevent
 //     macro redefinition warnings (C4005).
+//   - Updated version and timestamp.
 // =================================================================================================
 
 // Define Windows version for API compatibility (e.g., for WASAPI functions)
@@ -32,8 +34,7 @@
 #endif
 
 #ifndef _M_X64
-#define _M_X64
+#define _M_X64 
 #endif
 
 #include <pj/config_site_sample.h>
-#include <pj/pjsip_extra_defines.h> // Include the new extra defines file
