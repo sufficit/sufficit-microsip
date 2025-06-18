@@ -3,8 +3,8 @@
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 18, 2025 - 00:25:00 AM -03
-# Version: 1.0.70
+# Date: June 18, 2025 - 00:35:00 AM -03
+# Version: 1.0.72
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
@@ -18,8 +18,13 @@
 # Changes in Version 9:
 #   - Updated version and timestamp in script header.
 # Changes in Version 1.0.70:
-#   - FIXED: Corrected ARTIFACT_PREFIX to match the actual naming convention of Opus releases,
-#     removing the redundant "-build" string which caused the artifact not to be found.
+#   - FIXED: Corrected ARTIFACT_PREFIX and modified logic to correctly construct the expected
+#     artifact name from the release tag, removing the redundant "-build" string which caused
+#     the artifact not to be found during download.
+# Changes in Version 1.0.72:
+#   - FIXED: Further refined the logic for constructing the expected artifact name to reliably
+#     extract the date-time part from the release tag, accommodating variations like "build-".
+#     This ensures that the script correctly matches the artifact name on GitHub releases.
 # =================================================================================================
 
 # Enforce stricter parsing and error handling
@@ -28,8 +33,8 @@ $ErrorActionPreference = "Stop"
 
 $REPO_OWNER="sufficit"
 $REPO_NAME="opus"
-# FIXED: Removed "-build" from ARTIFACT_PREFIX to match actual release asset names
-$ARTIFACT_PREFIX="opus-windows-x64" 
+# This base name should match the fixed part of your Windows Opus artifact name before the date/time.
+$ARTIFACT_BASE_NAME="opus-windows-x64" 
 $ARTIFACT_EXT=".zip"
 
 # Use the GH_PAT environment variable directly
@@ -44,19 +49,26 @@ try {
     }
 
     $LATEST_RELEASE_DATA = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" -Headers $headers -ErrorAction Stop
-    $LATEST_RELEASE_TAG = $LATEST_RELEASE_DATA.tag_name
-
-    if (-not $LATEST_RELEASE_TAG) {
-        throw "Could not retrieve the latest release tag from GitHub API."
+    
+    if (-not $LATEST_RELEASE_DATA -or -not $LATEST_RELEASE_DATA.tag_name) {
+        throw "Could not retrieve the latest release tag from GitHub API or API response was invalid."
     }
+    $LATEST_RELEASE_TAG = $LATEST_RELEASE_DATA.tag_name
 
     Write-Host "Found latest Opus release tag: ${LATEST_RELEASE_TAG}"
 
-    # The tag might be "build-20250616-164541", but the asset name doesn't include "build-"
-    # We need to construct the expected artifact name correctly.
-    $cleanedTagForArtifact = $LATEST_RELEASE_TAG -replace "build-", ""
-    $expectedArtifactName = "${ARTIFACT_PREFIX}-${cleanedTagForArtifact}.zip"
-    Write-Host "Expected artifact name: ${expectedArtifactName}"
+    # Extract just the date-time part from the tag_name, regardless of prefix.
+    # This regex looks for YYYYMMDD-HHMMSS at the end of the tag.
+    if ($LATEST_RELEASE_TAG -match '(\d{8}-\d{6})$') {
+        $dateTimePart = $matches[1]
+    } else {
+        # Fallback if the date-time part is not exactly as expected, try to use the whole tag
+        Write-Warning "Could not parse specific date-time part from tag '${LATEST_RELEASE_TAG}'. Using full tag as part of artifact name."
+        $dateTimePart = $LATEST_RELEASE_TAG -replace "build-", "" # Still remove "build-" if it exists
+    }
+
+    $expectedArtifactName = "${ARTIFACT_BASE_NAME}-${dateTimePart}${ARTIFACT_EXT}"
+    Write-Host "Constructed expected artifact name: ${expectedArtifactName}"
 
     # Filter assets to find the specific zip file
     $downloadUrl = $null

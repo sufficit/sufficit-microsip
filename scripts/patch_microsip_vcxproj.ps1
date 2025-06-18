@@ -3,14 +3,14 @@
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 18, 2025 - 12:10:00 AM -03
-# Version: 1.0.69
+# Date: June 18, 2025 - 00:35:00 AM -03
+# Version: 1.0.71
 #
 # This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
 # Changes:
 #   - FIXED: Explicitly *replaces* `AdditionalLibraryDirectories` and `AdditionalDependencies`
-#     con precisely controlled absolute paths and libraries. This eliminates potential conflicts
+#     with precisely controlled absolute paths and libraries. This eliminates potential conflicts
 #     from existing relative paths or implicit default behaviors in the .vcxproj, addressing
 #     persistent LNK1181 errors.
 #   - FIXED: Corrected PowerShell parsing error "No characters are allowed after a here-string header".
@@ -100,8 +100,8 @@ try {
         $linkerNode.AppendChild($additionalLibDirsNode)
     }
     # Explicitly set the library directories.
-    # Note: No '$()' around $(LibraryPath) to keep it as an MSBuild macro.
-    $additionalLibDirsNode.'#text' = "${PjsipLibRoot};${PjsipLibRoot}\third_party;$(LibraryPath)"
+    # Note the change: $(LibraryPath) is now a literal string to be inserted, NOT interpolated by PowerShell.
+    $additionalLibDirsNode.'#text' = "${PjsipLibRoot};${PjsipLibRoot}\third_party;`$(LibraryPath)" # Using backtick to escape $ for PowerShell
     Write-Host "Set AdditionalLibraryDirectories in $ProjFile to: $($additionalLibDirsNode.'#text')"
 
     # List all PJSIP libraries that are being compiled/renamed
