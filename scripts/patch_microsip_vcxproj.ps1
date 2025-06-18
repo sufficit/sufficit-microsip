@@ -13,8 +13,6 @@
 #   - Ensures correct preprocessor definitions, including PJMEDIA_AUD_MAX_DEVS and _GLOBAL_VIDEO.
 #   - Sets absolute library directories for PJSIP and common Windows libraries.
 #   - Explicitly defines all required PJSIP libraries in AdditionalDependencies.
-#   - Adds `/NODEFAULTLIB:libpjproject-x86_64-x64-vc14-Release-Static.lib` to
-#     Linker->AdditionalOptions as a fallback.
 #   - Fixed: Added 'Wtsapi32.lib' to AdditionalDependencies for WTSRegisterSessionNotification.
 #   - Fixed: Ensured /MD (Multi-threaded DLL) runtime library setting for MicroSIP to match PJSIP.
 #   - NEW: Added '_AFXDLL' to PreprocessorDefinitions to resolve C1189 MFC error when using /MD.

@@ -28,9 +28,6 @@
 #include <pjsua-lib/pjsua.h>
 #include <pjsua-lib/pjsua_internal.h>
 
-// O BLOCO #pragma comment(lib, "libpjproject-...") FOI REMOVIDO DAQUI,
-// POIS AS DEPENDÊNCIAS SÃO AGORA GERENCIADAS NO microsip.vcxproj.
-
 #include "MMNotificationClient.h"
 
 #include "BaseDialog.h"

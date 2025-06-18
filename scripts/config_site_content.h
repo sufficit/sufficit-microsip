@@ -1,15 +1,15 @@
-# =================================================================================================
-# PJSIP CUSTOM CONFIGURATION FILE CONTENT
-#
-# Author: Hugo Castro de Deco, Sufficit
-# Collaboration: Gemini AI for Google
-# Date: June 16, 2025
-# Version: 1
-#
-# This file provides custom configuration definitions for PJSIP,
-# including platform-specific settings and feature flags.
-# It is intended to be copied to pjlib/include/pj/config_site.h during build.
-# =================================================================================================
+// =================================================================================================
+// PJSIP CUSTOM CONFIGURATION FILE CONTENT
+//
+// Author: Hugo Castro de Deco, Sufficit
+// Collaboration: Gemini AI for Google
+// Date: June 18, 2025
+// Version: 2 (Corrected comment block for C/C++ preprocessor compatibility)
+//
+// This file provides custom configuration definitions for PJSIP,
+// including platform-specific settings and feature flags.
+// It is intended to be copied to pjlib/include/pj/config_site.h during build.
+// =================================================================================================
 
 // Define Windows version for API compatibility (e.g., for WASAPI functions)
 #ifndef _WIN32_WINNT

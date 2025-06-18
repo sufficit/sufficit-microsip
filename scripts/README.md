@@ -63,11 +63,6 @@ This script has been the source of the most challenging debugging due to interac
 
 ### 4. `mainDlg.h` and Linker Errors (Latest Debugging Session: June 18, 2025)
 
-* **Problem 1: `LNK1104: cannot open file 'libpjproject-x86_64-x64-vc14-Release-Static.lib'`**
-    * **Root Cause:** The `libpjproject-x86_64-x64-vc14-Release-Static.lib` estava sendo referenciada por uma diretiva `#pragma comment(lib, ...)` diretamente no `mainDlg.h`, ignorando as configurações do `.vcxproj` e as renomeações de biblioteca feitas pelos scripts. O linker estava tentando encontrar uma biblioteca com o nome exato do artefato original da PJSIP, que não existia mais após a nossa etapa de renomeação.
-    * **Solution:** Removed the entire `#pragma comment(lib, ...)` block from `mainDlg.h`. All library dependencies are now explicitly managed by `patch_microsip_vcxproj.ps1` in the `.vcxproj` file.
-    * **Related Note:** `patch_microsip_vcxproj.ps1` (v1.0.78) also includes a `/NODEFAULTLIB:libpjproject-x86_64-x64-vc14-Release-Static.lib` in `AdditionalOptions` do linker como uma camada extra de proteção contra referências implícitas, embora a remoção do `#pragma` seja a correção principal.
-
 * **Problem 2: `error C4430: missing type specifier - int assumed. Note: C++ does not support default-int` and `error C2556: 'void CmainDlg::BaloonPopup(CString,CString,DWORD)': overloaded function differs only by return type from 'int CmainDlg::BaloonPopup(CString,CString,DWORD)'`**
     * **Root Cause:** A declaração da função `BaloonPopup` em `mainDlg.h` estava faltando o especificador de tipo de retorno `void` na definição da classe `CmainDlg`. O compilador assumiu `int` por padrão para essa declaração, o que entrava em conflito com a definição real da função (que é `void`).
     * **Solution:** Corrected the function signature in `mainDlg.h` to explicitly include `void` as the return type: `void BaloonPopup(CString title, CString message, DWORD flags = NIIF_WARNING);`.
