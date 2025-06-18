@@ -3,8 +3,8 @@
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 18, 2025 - 00:45:00 AM -03
-# Version: 1.0.72
+# Date: June 18, 2025 - 01:05:00 AM -03
+# Version: 1.0.73
 #
 # This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
@@ -27,6 +27,8 @@
 #     "The term 'LibraryPath' is not recognized" error.
 #   - FIXED: Added 'PJMEDIA_AUD_MAX_DEVS=4' to PreprocessorDefinitions in microsip.vcxproj to resolve
 #     'undeclared identifier' errors.
+#   - FIXED: Enhanced handling of `AdditionalDependencies` to explicitly remove existing nodes
+#     before adding the new set, preventing leftover old library references (like LNK1104 for `libpjproject-x86_64-x64-vc14-Release-Static.lib`).
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -96,6 +98,9 @@ try {
 
     # Ensure PJMEDIA_AUD_MAX_DEVS is defined, along with other common definitions
     $currentDefinitions = $preprocessorDefinitionsNode.'#text'
+    # Splitting and filtering out potential duplicates of common definitions added by VS or other means
+    $existingList = $currentDefinitions.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
+
     $requiredDefinitions = @(
         "WIN32",
         "_WINDOWS",
@@ -105,8 +110,8 @@ try {
         "PJMEDIA_AUD_MAX_DEVS=4" # Explicitly define this macro
     )
 
-    # Filter out existing duplicates and add new ones
-    $updatedDefinitions = ($currentDefinitions.Split(';') | Where-Object { $_ -ne "" }) + $requiredDefinitions | Select-Object -Unique
+    # Combine existing unique definitions with required ones, and remove any duplicates
+    $updatedDefinitions = ($existingList + $requiredDefinitions) | Select-Object -Unique
     $preprocessorDefinitionsNode.'#text' = ($updatedDefinitions | Where-Object { $_ -ne "" }) -join ';'
     Write-Host "Set PreprocessorDefinitions in $ProjFile to: $($preprocessorDefinitionsNode.'#text')"
 
@@ -169,22 +174,27 @@ try {
         "crypt32.lib",
         "dnsapi.lib"
     )
-
-    $additionalDependenciesNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalDependencies", $nsManager)
-    if (-not $additionalDependenciesNode) {
-        $additionalDependenciesNode = $projXml.CreateElement("AdditionalDependencies", $nsManager.LookupNamespace("msbuild"))
-        $linkerNode.AppendChild($additionalDependenciesNode)
+    
+    # NEW IMPROVEMENT: Remove any existing AdditionalDependencies nodes to ensure a clean slate
+    $existingAdditionalDependenciesNodes = $linkerNode.SelectNodes("./msbuild:AdditionalDependencies", $nsManager)
+    foreach ($nodeToRemove in $existingAdditionalDependenciesNodes) {
+        Write-Host "Removing existing AdditionalDependencies node: $($nodeToRemove.'#text')"
+        $nodeToRemove.ParentNode.RemoveChild($nodeToRemove)
     }
-    # Replace content, ensuring unique libs
-    # Removed: ';%(AdditionalDependencies)' for absolute control
-    $additionalDependenciesNode.'#text' = ($pjsipLibs + $windowsCommonLibs | Select-Object -Unique) -join ';'
-    Write-Host "Set AdditionalDependencies in $ProjFile to: $($additionalDependenciesNode.'#text')"
 
-    # Remove any specific old PJSIP static library references if they exist as separate nodes
-    # This specifically targets the "libpjproject-x86_64-x64-vc14-Release-Static.lib" issue.
+    # Now create a new, clean AdditionalDependencies node
+    $additionalDependenciesNode = $projXml.CreateElement("AdditionalDependencies", $nsManager.LookupNamespace("msbuild"))
+    $linkerNode.AppendChild($additionalDependenciesNode)
+
+    # Set the content with the comprehensive list
+    $additionalDependenciesNode.'#text' = ($pjsipLibs + $windowsCommonLibs | Select-Object -Unique) -join ';'
+    Write-Host "Set (newly created) AdditionalDependencies in $ProjFile to: $($additionalDependenciesNode.'#text')"
+
+    # The previous logic to remove specific old PJSIP static library references is now largely redundant
+    # since we are replacing the entire node, but we'll keep it for robustness against other potential nodes.
     $oldPjsipLibNodes = $linkerNode.SelectNodes("child::*[normalize-space(.)='libpjproject-x86_64-x64-vc14-Release-Static.lib']", $nsManager)
     foreach ($oldNode in $oldPjsipLibNodes) {
-        Write-Host "Removing old PJSIP static library reference: $($oldNode.'#text')"
+        Write-Host "Removing old PJSIP static library reference (redundant after full replace, but good check): $($oldNode.'#text')"
         $oldNode.ParentNode.RemoveChild($oldNode)
     }
 
