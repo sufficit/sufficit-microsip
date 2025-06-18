@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.69 (Using _GLOBAL_VERSION from const.h for automated tagging)
-# Last Updated: 2025-06-18 12:00:00 PM -03
+# Action Version: 1.0.70 (Final adjustments for automated tag creation and release flow)
+# Last Updated: 2025-06-18 12:15:00 PM -03
 # =================================================================================================
 
 name: C++ Build
@@ -39,6 +39,8 @@ jobs:
       - name: Checkout Source Code (sufficit/sufficit-microsip)
         uses: actions/checkout@v4
         with:
+          # When triggered by a tag, this checks out the tag.
+          # When triggered by main, it checks out main.
           repository: sufficit/sufficit-microsip
           path: . # Checkout to the root of the workspace
           token: ${{ secrets.GH_PAT }}
@@ -65,7 +67,7 @@ jobs:
           lfs: false
           set-safe-directory: true
 
-      # Step 2: Generate build date for artifact naming
+      # Step 2: Get Build Date
       - name: Get Build Date
         shell: pwsh
         run: |
@@ -81,7 +83,7 @@ jobs:
         with:
           msbuild-architecture: x64
 
-      # Step 4: Navigate to PJSIP directory, download and prepare Opus, copy PJSIP config files, and compile PJSIP
+      # Step 4: Prepare and Build PJSIP
       - name: Prepare and Build PJSIP
         shell: pwsh
         run: |
@@ -121,8 +123,6 @@ jobs:
           $scriptContentPjsip = Get-Content $scriptPathPjsip -Raw -Encoding UTF8
           Set-Content -Path $tempScriptPathPjsip -Value $scriptContentPjsip -Encoding $utf8NoBomEncoding
           # We don't pass $SlnFile parameter to build_pjsip.ps1 because it's only compiling projects, not the whole solution.
-          # If build_pjsip.ps1 needed to build the solution directly, it would look like:
-          # pwsh -File $tempScriptPathPjsip -SlnFile (Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject-vs14.sln")
           pwsh -File $tempScriptPathPjsip # Execute the PJSIP build script
 
           Write-Host "PJSIP compilation step completed."
@@ -137,10 +137,6 @@ jobs:
           $pjsipRoot = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject"
           $pjsipLib = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
           $pjsipAppsInclude = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjsip/include"
-          Write-Host "Patching microsip.vcxproj at: $microsipVcxprojPath"
-          Write-Host "PJSIP Root: $pjsipRoot"
-          Write-Host "PJSIP Lib Path: $pjsipLib"
-          Write-Host "PJSIP Apps Include Path: $pjsipAppsInclude"
           & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
             -ProjFile $microsipVcxprojPath `
             -PjsipIncludeRoot "$pjsipRoot" `
@@ -176,8 +172,8 @@ jobs:
           path: |
             ${{ github.workspace }}\x64\Release\microsip.exe
             ${{ github.workspace }}\x64\Release\microsip.pdb
-          if-no-files-found: error
-          retention-days: 5 # Adjusted to common repository policy
+          if-no-files-found: error # Use 'error' if you expect these files to always exist
+          retention-days: 5 # Adjusted to common repository policy or your desired valid value
           compression-level: 6
           overwrite: false
           include-hidden-files: false
@@ -235,10 +231,12 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    if: success() && startsWith(github.ref, 'refs/tags/v') # This condition remains the same: triggered ONLY by a tag push
+    # This job is triggered by a TAG PUSH, not by the main branch build.
+    # When you push vX.Y.Z, a NEW workflow run starts, build-windows runs on the tag's commit,
+    # and then create-release runs because github.ref is refs/tags/vX.Y.Z.
+    if: success() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [build-windows, create-git-tag] # Now also depends on the tag creation job to ensure tag is pushed
-                                          # before trying to create a release from it.
+    needs: [build-windows] # This job only needs artifacts from the build-windows job in the *current* workflow run.
 
     steps:
       - name: Checkout code
