@@ -2,21 +2,21 @@
 # PATCH SCRIPT FOR MicroSIP PROJECT FILE (CALLED BY GITHUB ACTIONS WORKFLOW)
 #
 # Author: Hugo Castro de Deco, Sufficit, and Gemini AI for Google
-# Date: June 18, 2025 - 01:50:00 AM -03
-# Version: 1.0.77
+# Date: June 18, 2025 - 02:10:00 AM -03
+# Version: 1.0.78
 #
 # This script configures MicroSIP's vcxproj to link with PJSIP libraries.
 #
 # Changes:
 #   - Aggressively removes any textual occurrences of the old problematic PJSIP static library name.
 #   - Explicitly sets include directories to point to compiled PJSIP headers.
-#   - Ensures correct preprocessor definitions, including PJMEDIA_AUD_MAX_DEVS.
+#   - Ensures correct preprocessor definitions, including PJMEDIA_AUD_MAX_DEVS and _GLOBAL_VIDEO.
 #   - Sets absolute library directories for PJSIP and common Windows libraries.
 #   - Explicitly defines all required PJSIP libraries in AdditionalDependencies.
-#   - NEW: Adds `/NODEFAULTLIB:libpjproject-x86_64-x64-vc14-Release-Static.lib` to
-#     Linker->AdditionalOptions to explicitly tell the linker to ignore any implicit
-#     or inherited references to this problematic old library, as it appears to be
-#     coming from an unknown implicit source.
+#   - Adds `/NODEFAULTLIB:libpjproject-x86_64-x64-vc14-Release-Static.lib` to
+#     Linker->AdditionalOptions as a fallback.
+#   - FIXED: Added 'Wtsapi32.lib' to AdditionalDependencies for WTSRegisterSessionNotification.
+#   - FIXED: Ensured /MD (Multi-threaded DLL) runtime library setting for MicroSIP to match PJSIP.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -61,25 +61,46 @@ try {
     $itemDefinitionGroupNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]", $nsManager)
 
     if (-not $itemDefinitionGroupNode) {
-        Write-Host "##[error]Error: Could not find Release|x64 ItemDefinitionGroup in $ProjFile."
-        exit 1
+        Write-Host "Creating missing ItemDefinitionGroup for Release|x64."
+        $projectNode = $projXml.SelectSingleNode("/msbuild:Project", $nsManager)
+        $itemDefinitionGroupNode = $projXml.CreateElement("ItemDefinitionGroup", $nsManager.LookupNamespace("msbuild"))
+        # Corrected: Use a single-quoted here-string variable for the attribute value.
+        # The closing marker for a here-string must be on its own line.
+        $conditionValue = @'
+$(Configuration)|$(Platform)'=='Release|x64'
+'@
+        $itemDefinitionGroupNode.SetAttribute("Condition", $conditionValue)
+        $projectNode.AppendChild($itemDefinitionGroupNode)
     }
 
-    # --- Patching Include Paths ---
+    # Find or create the ClCompile node
     $clCompileNode = $itemDefinitionGroupNode.SelectSingleNode("./msbuild:ClCompile", $nsManager)
     if (-not $clCompileNode) {
-        Write-Host "##[error]Error: Could not find ClCompile node within Release|x64 ItemDefinitionGroup in $ProjFile."
-        exit 1
+        Write-Host "Creating missing ClCompile node for Release|x64."
+        $clCompileNode = $projXml.CreateElement("ClCompile", $nsManager.LookupNamespace("msbuild"))
+        $itemDefinitionGroupNode.AppendChild($clCompileNode)
     }
 
-    $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
-    if (-not $additionalIncludeDirsNode) {
-        $additionalIncludeDirsNode = $projXml.CreateElement("AdditionalIncludeDirectories", $nsManager.LookupNamespace("msbuild"))
-        $clCompileNode.AppendChild($additionalIncludeDirsNode)
+    # Find or create the Link node
+    $linkerNode = $itemDefinitionGroupNode.SelectSingleNode("./msbuild:Link", $nsManager)
+    if (-not $linkerNode) {
+        Write-Host "Creating missing Link node for Release|x64."
+        $linkerNode = $projXml.CreateElement("Link", $nsManager.LookupNamespace("msbuild"))
+        $itemDefinitionGroupNode.AppendChild($linkerNode)
     }
 
-    # Define all required include paths relative to the project root
-    $includePaths = @(
+    # --- Patching Runtime Library (CRITICAL for LNK4098 / __imp__stricmp) ---
+    $runtimeLibraryNode = $clCompileNode.SelectSingleNode("./msbuild:RuntimeLibrary", $nsManager)
+    if (-not $runtimeLibraryNode) {
+        $runtimeLibraryNode = $projXml.CreateElement("RuntimeLibrary", $nsManager.LookupNamespace("msbuild"))
+        $clCompileNode.AppendChild($runtimeLibraryNode)
+    }
+    # Set to Multi-threaded DLL (/MD) to match PJSIP's default build, resolving CRT conflicts.
+    $runtimeLibraryNode.InnerText = "MultiThreadedDLL" 
+    Write-Host "Set RuntimeLibrary for Release|x64 in $ProjFile to: $($runtimeLibraryNode.InnerText)"
+
+    # Process AdditionalIncludeDirectories (Replace existing for full control)
+    $requiredIncludes = @(
         ".", # For headers in the MicroSIP project root (where microsip.vcxproj is)
         ".\lib", # For headers in MicroSIP's lib folder
         ".\lib\jsoncpp\json", # Corrected path for json.h
@@ -88,13 +109,19 @@ try {
         "external\pjproject\pjnath\include",
         "external\pjproject\pjmedia\include",
         "external\pjproject\pjsip\include",
-        # Use the variable directly as it points to the correct location
-        "external\pjproject\pjlib\include\pj\opus" 
+        "external\pjproject\pjlib\include\pj\opus" # For Opus headers
         # Removed: '%(AdditionalIncludeDirectories)' for absolute control
     )
 
-    $additionalIncludeDirsNode.'#text' = ($includePaths | Select-Object -Unique) -join ';'
+    $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
+    if (-not $additionalIncludeDirsNode) {
+        $additionalIncludeDirsNode = $projXml.CreateElement("AdditionalIncludeDirectories", $nsManager.LookupNamespace("msbuild"))
+        $clCompileNode.AppendChild($additionalIncludeDirsNode)
+    }
+    # Replace content, ensuring unique paths
+    $additionalIncludeDirsNode.'#text' = ($requiredIncludes | Select-Object -Unique) -join ';'
     Write-Host "Set AdditionalIncludeDirectories in $ProjFile to: $($additionalIncludeDirsNode.'#text')"
+
 
     # --- Patching Preprocessor Definitions ---
     $preprocessorDefinitionsNode = $clCompileNode.SelectSingleNode("./msbuild:PreprocessorDefinitions", $nsManager)
@@ -103,7 +130,7 @@ try {
         $clCompileNode.AppendChild($preprocessorDefinitionsNode)
     }
 
-    # Ensure PJMEDIA_AUD_MAX_DEVS is defined, along with other common definitions
+    # Ensure PJMEDIA_AUD_MAX_DEVS and _GLOBAL_VIDEO are defined, along with other common definitions
     $currentDefinitions = $preprocessorDefinitionsNode.InnerText
     # Splitting and filtering out potential duplicates of common definitions added by VS or other means
     $existingList = $currentDefinitions.Split(';') | Where-Object { $_ -ne "" } | ForEach-Object { $_.Trim() }
@@ -114,7 +141,8 @@ try {
         "NDEBUG",
         "_UNICODE",
         "UNICODE",
-        "PJMEDIA_AUD_MAX_DEVS=4" # Explicitly define this macro
+        "PJMEDIA_AUD_MAX_DEVS=4", # Explicitly define this macro
+        "_GLOBAL_VIDEO" # Ensure video compilation is enabled in MicroSIP
     )
 
     # Combine existing unique definitions with required ones, and remove any duplicates
@@ -124,12 +152,6 @@ try {
 
 
     # --- Patching Library Paths and Dependencies ---
-    $linkerNode = $itemDefinitionGroupNode.SelectSingleNode("./msbuild:Link", $nsManager)
-    if (-not $linkerNode) {
-        Write-Host "##[error]Error: Could not find Link node within Release|x64 ItemDefinitionGroup in $ProjFile."
-        exit 1
-    }
-
     # Ensure absolute paths for Library Directories
     # IMPORTANT: $(LibraryPath) must remain as an MSBuild macro, not a PowerShell variable.
     $additionalLibDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
@@ -180,7 +202,8 @@ try {
         "user32.lib",
         "gdi32.lib",
         "crypt32.lib",
-        "dnsapi.lib"
+        "dnsapi.lib",
+        "Wtsapi32.lib" # NEW: For WTSRegisterSessionNotification / WTSUnRegisterSessionNotification
     )
 
     $additionalDependenciesNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalDependencies", $nsManager)
@@ -191,9 +214,9 @@ try {
     # Replace content, ensuring unique libs
     # Removed: ';%(AdditionalDependencies)' for absolute control
     $additionalDependenciesNode.InnerText = ($pjsipLibs + $windowsCommonLibs | Select-Object -Unique) -join ';'
-    Write-Host "Set AdditionalDependencies in $ProjFile to: $($additionalDependenciesNode.InnerText)"
+    Write-Host "Set AdditionalDependencies in $ProjFile to: $($additionalDependenciesNode.'#text')"
 
-    # NEW: Add /NODEFAULTLIB option for the problematic library if it's still being linked implicitly
+    # Add /NODEFAULTLIB option for the problematic library if it's still being linked implicitly
     $additionalOptionsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalOptions", $nsManager)
     if (-not $additionalOptionsNode) {
         $additionalOptionsNode = $projXml.CreateElement("AdditionalOptions", $nsManager.LookupNamespace("msbuild"))
