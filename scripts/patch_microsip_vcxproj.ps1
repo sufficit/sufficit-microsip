@@ -1,6 +1,11 @@
 # =================================================================================================
 # PATCH SCRIPT FOR MicroSIP PROJECT FILE (CALLED BY GITHUB ACTIONS WORKFLOW)
 #
+# Author: Hugo Castro de Deco, Sufficit
+# Collaboration: Gemini AI for Google
+# Date: June 17, 2025 - 09:00:00 PM -03
+# Version: 1.0.68
+#
 # This script adds PJSIP and MicroSIP's internal include and library paths to microsip.vcxproj.
 #
 # Changes:
@@ -16,6 +21,9 @@
 #     paths are now explicitly listed.
 #   - ADDED: Explicitly removes any existing <AdditionalDependencies> nodes that might contain
 #     the old 'libpjproject-x86_64-x64-vc14-Release-Static.lib' reference to prevent LNK1104.
+#   - ADDED: Version and timestamp to script header for traceability.
+#   - FIXED: Corrected the handling of `$(LibraryPath)` in AdditionalLibraryDirectories to ensure
+#     it's passed as an MSBuild macro, not a PowerShell variable.
 # =================================================================================================
 param (
     [Parameter(Mandatory=$true)]
@@ -84,14 +92,15 @@ try {
     }
 
     # Ensure absolute paths for Library Directories
-    # Removed %(AdditionalLibraryDirectories) for absolute control.
+    # IMPORTANT: $(LibraryPath) must remain as an MSBuild macro, not a PowerShell variable.
     $additionalLibDirsNode = $linkerNode.SelectSingleNode("./msbuild:AdditionalLibraryDirectories", $nsManager)
     if (-not $additionalLibDirsNode) {
         $additionalLibDirsNode = $projXml.CreateElement("AdditionalLibraryDirectories", $nsManager.LookupNamespace("msbuild"))
         $linkerNode.AppendChild($additionalLibDirsNode)
     }
     # Explicitly set the library directories.
-    $additionalLibDirsNode.'#text' = "${PjsipLibRoot};${PjsipLibRoot}\third_party;$(LibraryPath)" # Keep $(LibraryPath) for system libs
+    # Note: No '$()' around $(LibraryPath) to keep it as an MSBuild macro.
+    $additionalLibDirsNode.'#text' = "${PjsipLibRoot};${PjsipLibRoot}\third_party;$(LibraryPath)"
     Write-Host "Set AdditionalLibraryDirectories in $ProjFile to: $($additionalLibDirsNode.'#text')"
 
     # List all PJSIP libraries that are being compiled/renamed
