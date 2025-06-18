@@ -11,8 +11,8 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.67 (Updated to execute build_pjsip.ps1 correctly and refined artifact paths)
-# Last Updated: 2025-06-18 11:26:00 AM -03
+# Action Version: 1.0.68 (Fixed artifact upload 'if-no-files-found' and adjusted 'retention-days')
+# Last Updated: 2025-06-18 11:40:00 AM -03
 # =================================================================================================
 
 name: C++ Build
@@ -168,8 +168,10 @@ jobs:
           path: |
             ${{ github.workspace }}\x64\Release\microsip.exe
             ${{ github.workspace }}\x64\Release\microsip.pdb
-          retention-days: 7
-          if-no-files-found: fail # Change to 'fail' once confident the paths are correct
+          # Fix: Change 'fail' to a valid option like 'error'
+          if-no-files-found: error # Changed from 'fail' to 'error'
+          # Fix: Adjust retention-days to match repository policy (e.g., 5 days)
+          retention-days: 5 # Changed from 7 to 5 based on warning
           compression-level: 6
           overwrite: false
           include-hidden-files: false
