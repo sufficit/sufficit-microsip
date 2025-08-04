@@ -1,127 +1,274 @@
 # =================================================================================================
-# GITHUB ACTIONS WORKFLOW FOR BUILDING THE SUFFICIT/SUFFICIT-MICROSIP PROJECT
+# GitHub Actions Workflow: PJSIP Build for Windows, Linux, and Linux ARM
 #
-# WORKFLOW VERSION: 37 (Final - Simplified Pathing and Correct Script Call)
+# This workflow automates the compilation of the PJSIP project for Windows (x64), Linux (x64),
+# and Linux ARM (64-bit). It is triggered on pushes to the 'main' branch and automatically
+# creates a tag and release for each successful build on 'main'. It also continues to be
+# triggered by manually pushed version tags. Build artifacts are named
+# using the UTC date and time of the build.
 #
-# Author: Hugo Castro de Deco, Sufficit
-# Collaboration: Gemini AI for Google
-# Date: June 13, 2025
-# 
-# This header should be updated keeping the same format on every interaction.
-# Static things and recomendations for AI:
+# The main change is the integration of pre-compiled Opus libraries (assuming that
+# they are provided by the same company 'sufficit' via GitHub Releases), instead of
+# installing system development packages or compiling Opus internally.
 #
-#  1º Comments in this file are always in english
-#  2º WORKFLOW VERSION has to be updated by each IA interatiction
-#  3º Bellow this section the AI should explain every success step on build proccess
-#  4º In Order to avoid syntax errors, and it should never be ignored, we have two more files on repository root:
-#   - `config_site.h`: used for includes and variables declarations
-#   - `scripts/build_pjsip.ps1`: the definitive build script (with underscore)
-#  5º Do not change this header structure
-#
-# Above this line the should never forget.
-#
-# == Explanation of Build Steps ==
-#
-# This workflow is the definitive version. It uses a separate script for the PJSIP
-# build and has simplified, robust pathing by checking out the main repo to the root
-# of the workspace. This avoids all previous path resolution and script execution errors.
+# Action Version: 1.0.70 (Final adjustments for automated tag creation and release flow)
+# Last Updated: 2025-06-18 12:15:00 PM -03
 # =================================================================================================
 
-name: Build C++ and Create Release
+name: C++ Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+    tags:
+      - 'v*.*.*' # Trigger on version tags like v1.0.0
+  workflow_dispatch: # Allows manual triggering of the workflow
+
+env:
+  # Define the GH_PAT variable for PowerShell script authentication
+  # This variable must be configured as a secret in the repository.
+  GH_PAT: ${{ secrets.GH_PAT }}
 
 jobs:
-  build:
-    runs-on: windows-latest
-    outputs:
-      version: ${{ steps.generate_version.outputs.VERSION }}
+  build-windows:
+    runs-on: windows-2022
 
     steps:
-    - name: 1. Checkout Main Repository to root
-      uses: actions/checkout@v4
-      # By not specifying a 'path', the repo is checked out to the workspace root, simplifying all subsequent paths.
+      # Step 1: Checkout main source code
+      - name: Checkout Source Code (sufficit/sufficit-microsip)
+        uses: actions/checkout@v4
+        with:
+          # When triggered by a tag, this checks out the tag.
+          # When triggered by main, it checks out main.
+          repository: sufficit/sufficit-microsip
+          path: . # Checkout to the root of the workspace
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0 # Fetch all history to ensure tag creation works correctly
+          # IMPORTANT: Removed 'submodules: recursive' because 'sufficit/pjproject'
+          # is being explicitly checked out in a separate step below.
 
-    - name: 2. Clone PJSIP Repository
-      uses: actions/checkout@v4
-      with:
-        repository: pjsip/pjproject
-        path: pjproject
-    
-    - name: 3. Clone Opus Repository
-      uses: actions/checkout@v4
-      with:
-        repository: xiph/opus
-        path: opus-source
+      # Step 1.5: Checkout pjproject explicitly
+      - name: Checkout pjproject (sufficit/pjproject)
+        uses: actions/checkout@v4
+        with:
+          repository: sufficit/pjproject
+          path: external/pjproject # Checkout to the desired subdirectory
+          token: ${{ secrets.GH_PAT }}
+          submodules: false # No submodules within pjproject itself are needed
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: true
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          set-safe-directory: true
 
-    - name: 4. Copy PJSIP config_site.h
-      shell: pwsh
-      run: Copy-Item -Path "./config_site.h" -Destination "pjproject/pjlib/include/pj/config_site.h"
+      # Step 2: Get Build Date
+      - name: Get Build Date
+        shell: pwsh
+        run: |
+          # Get current UTC date/time and format it
+          $buildDate = (Get-Date -UFormat %Y%m%d-%H%M%S)
+          Write-Host "Calculated BUILD_DATE: $buildDate"
+          # Set as a workflow environment variable for subsequent steps
+          Write-Host "BUILD_DATE=$buildDate" >> $env:GITHUB_ENV
 
-    - name: 5. Build Opus Library
-      shell: pwsh
-      run: |
-        cmake -S opus-source -B opus-build -G "Visual Studio 17 2022" -A Win32
-        cmake --build opus-build --config Release
+      # Step 3: Setup MSBuild
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
 
-    - name: 6. Add MSBuild to path
-      uses: microsoft/setup-msbuild@v2
+      # Step 4: Prepare and Build PJSIP
+      - name: Prepare and Build PJSIP
+        shell: pwsh
+        run: |
+          # Navigate to the PJSIP directory
+          Set-Location external/pjproject
+          Write-Host "Current path Set-Location: $(Get-Location)"
 
-    - name: 7. Build PJSIP Solution
-      shell: pwsh
-      run: |
-        # Define os caminhos absolutos, agora a partir da raiz do workspace.
-        $opus_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "opus-source/include"
-        $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject/pjproject-vs14.sln"
-        $script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/build_pjsip.ps1"
-        
-        Write-Host "Executando o script: $script_path"
-        
-        # Chama o script de build usando seu caminho absoluto e o operador de chamada '&'.
-        & $script_path -OpusIncludePath $opus_path -SlnFile $sln_path
+          # Debug: Check PowerShell Version in use
+          Write-Host "PowerShell Version being used:"
+          $PSVersionTable | Format-List | Out-String | Write-Host
+          
+          # Download and prepare Opus libraries for PJSIP
+          Write-Host "Executing scripts/download_opus_windows.ps1 for PJSIP (via temporary file)..."
+          $scriptPath = "$env:GITHUB_WORKSPACE/scripts/download_opus_windows.ps1"
+          $tempScriptPath = "temp_download_opus.ps1"
+          
+          $scriptContent = Get-Content $scriptPath -Raw -Encoding UTF8
+          $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+          Set-Content -Path $tempScriptPath -Value $scriptContent -Encoding $utf8NoBomEncoding
+          
+          pwsh -File $tempScriptPath
+          Write-Host "Scripts/download_opus_windows.ps1 completed."
+          
+          # Copy PJSIP configuration files
+          Write-Host "Copying config_site.h and pjsip_extra_defines.h to PJSIP..."
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/config_site_content.h" -Destination "pjlib/include/pj/config_site.h" -Force
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
+          Write-Host "PJSIP configuration files copied."
 
-    - name: 8. Prepare Libraries for Final Build
-      shell: pwsh
-      run: |
-        echo "--- Collecting all libraries for MicroSIP ---"
-        $dist_dir = "dist/lib"
-        New-Item -ItemType Directory -Force -Path $dist_dir
-        Copy-Item -Path pjproject/lib/*.lib -Destination $dist_dir
-        Copy-Item -Path opus-build/Release/opus.lib -Destination $dist_dir
-        
-    - name: 9. Generate Version Tag
-      id: generate_version
-      shell: bash
-      run: echo "VERSION=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
-      
-    - name: 10. Build the final project
-      shell: pwsh
-      # Agora executamos a partir da raiz, pois o checkout foi simplificado.
-      run: msbuild.exe microsip.vcxproj /p:Configuration=Release /p:Platform=x86 /p:AdditionalLibraryDirectories="./dist/lib"
+          # Compile essential PJSIP projects
+          Write-Host "Compiling essential PJSIP projects..."
+          # The logic for iterating and compiling individual projects is now inside build_pjsip.ps1
+          # Execute build_pjsip.ps1 dynamically from the checked out repository
+          Write-Host "Executing build_pjsip.ps1 for PJSIP (via temporary file)..."
+          $scriptPathPjsip = "$env:GITHUB_WORKSPACE/scripts/build_pjsip.ps1"
+          $tempScriptPathPjsip = "temp_build_pjsip.ps1"
+          $scriptContentPjsip = Get-Content $scriptPathPjsip -Raw -Encoding UTF8
+          Set-Content -Path $tempScriptPathPjsip -Value $scriptContentPjsip -Encoding $utf8NoBomEncoding
+          # We don't pass $SlnFile parameter to build_pjsip.ps1 because it's only compiling projects, not the whole solution.
+          pwsh -File $tempScriptPathPjsip # Execute the PJSIP build script
 
-    - name: 11. Upload build artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: microsip-build
-        # O caminho para o artefato também é mais simples agora.
-        path: Release/microsip.exe
+          Write-Host "PJSIP compilation step completed."
+          Set-Location $env:GITHUB_WORKSPACE
+          Write-Host "Returning to MicroSIP root directory: $(Get-Location)"
 
-  release:
-    needs: build
+      # Step 5: Patch microsip.vcxproj with absolute PJSIP paths
+      - name: Patch microsip.vcxproj
+        shell: pwsh
+        run: |
+          $microsipVcxprojPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "microsip.vcxproj"
+          $pjsipRoot = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject"
+          $pjsipLib = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
+          $pjsipAppsInclude = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/pjsip/include"
+          & "$env:GITHUB_WORKSPACE/scripts/patch_microsip_vcxproj.ps1" `
+            -ProjFile $microsipVcxprojPath `
+            -PjsipIncludeRoot "$pjsipRoot" `
+            -PjsipLibRoot "$pjsipLib" `
+            -PjsipAppsIncludePath "$pjsipAppsInclude"
+
+      # DEBUG STEP: List contents of PJSIP lib directory
+      - name: List PJSIP Lib Directory Contents
+        shell: pwsh
+        run: |
+          $pjsipLibDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "external/pjproject/lib"
+          Write-Host "Listing contents of ${pjsipLibDir}:"
+          Get-ChildItem -Path $pjsipLibDir | Format-List FullName, Name, Length, CreationTimeUtc, LastWriteTimeUtc
+
+      # Step 6: Compile the MicroSIP solution (final)
+      - name: Compile MicroSIP Solution (Final)
+        shell: pwsh
+        run: |
+          $microsipSlnPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "MicroSIP.sln"
+          Write-Host "Compiling MicroSIP solution: $microsipSlnPath"
+          msbuild.exe "$microsipSlnPath" /p:Configuration=Release /p:Platform=x64 /m /t:Build
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "##[error]MicroSIP compilation failed with exit code $LASTEXITCODE."
+              exit 1
+          }
+          Write-Host "MicroSIP compilation completed successfully."
+
+      # Step 7: Upload compiled MicroSIP artifacts
+      - name: Upload MicroSIP Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: microsip-windows-x64-${{ env.BUILD_DATE }}
+          path: |
+            ${{ github.workspace }}\x64\Release\microsip.exe
+            ${{ github.workspace }}\x64\Release\microsip.pdb
+          if-no-files-found: error # Use 'error' if you expect these files to always exist
+          retention-days: 5 # Adjusted to common repository policy or your desired valid value
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
+
+
+  # NEW JOB: Create Git Tag based on const.h version and push it
+  create-git-tag:
+    if: success() && github.ref == 'refs/heads/main' # Only runs if build-windows succeeds on the 'main' branch
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    needs: [build-windows] # Depends on build-windows to ensure compilation is successful
+
     steps:
-    - name: 1. Download build artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: microsip-build
-    - name: 2. Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ needs.build.outputs.version }}
-        name: "Release ${{ needs.build.outputs.version }}"
-        body: "Versão compilada automaticamente a partir do último push para a branch main."
-        files: microsip.exe
+      - name: Checkout code (for const.h)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history to create new tags based on current commit
+
+      - name: Extract version from const.h
+        id: get_version_from_const_h
+        run: |
+          # Read the content of const.h and extract the version string
+          # Example line: #define _GLOBAL_VERSION "3.21.6"
+          VERSION_LINE=$(grep "#define _GLOBAL_VERSION" const.h)
+          # Use sed or awk to extract the version number, removing quotes
+          CURRENT_VERSION=$(echo $VERSION_LINE | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
+          
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "::error file=const.h::Could not extract _GLOBAL_VERSION from const.h"
+            exit 1
+          fi
+          echo "Extracted _GLOBAL_VERSION: $CURRENT_VERSION"
+          echo "NEW_TAG=v$CURRENT_VERSION" >> $GITHUB_ENV # Set NEW_TAG as an environment variable
+
+      - name: Check if tag already exists
+        id: check_tag_exists
+        run: |
+          git fetch origin --tags
+          if git tag -l "${{ env.NEW_TAG }}" | grep -q "${{ env.NEW_TAG }}"; then
+            echo "::warning file=create-git-tag::Tag ${{ env.NEW_TAG }} already exists. Skipping tag creation."
+            echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT # Use GITHUB_OUTPUT to set output for subsequent steps
+          else
+            echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and Push Tag
+        if: ${{ steps.check_tag_exists.outputs.TAG_EXISTS == 'false' }} # Use output from previous step
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag ${{ env.NEW_TAG }}
+          git push origin ${{ env.NEW_TAG }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Use the default GITHUB_TOKEN for pushing tags
+
+
+  create-release:
+    name: Create GitHub Release
+    # This job is triggered by a TAG PUSH, not by the main branch build.
+    # When you push vX.Y.Z, a NEW workflow run starts, build-windows runs on the tag's commit,
+    # and then create-release runs because github.ref is refs/tags/vX.Y.Z.
+    if: success() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [build-windows] # This job only needs artifacts from the build-windows job in the *current* workflow run.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts # Downloads all artifacts into this directory
+
+      - name: List downloaded artifacts (for debug)
+        run: |
+          ls -R artifacts
+
+      - name: Get tag name
+        id: get_tag
+        # This will get the tag that triggered the workflow (e.g., v1.0.0 from refs/tags/v1.0.0)
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2 # Use a more recent release action if available
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Release ${{ env.TAG_NAME }} (${{ env.BUILD_DATE }})
+          body: |
+            Automated build for tag ${{ env.TAG_NAME }} created on ${{ env.BUILD_DATE }}.
+            See changelog for details.
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/microsip-windows-x64-${{ env.BUILD_DATE }}/*
+          # Add more lines here to include artifacts from other builds (Linux, etc.)
+          # if they are enabled and their artifacts are downloaded to 'artifacts/'
+          # artifacts/linux-build-artifacts/*

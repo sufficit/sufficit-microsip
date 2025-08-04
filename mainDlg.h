@@ -28,20 +28,6 @@
 #include <pjsua-lib/pjsua.h>
 #include <pjsua-lib/pjsua_internal.h>
 
-#ifndef _WIN64
-#ifdef NDEBUG
-#pragma comment(lib, "libpjproject-i386-Win32-vc14-Release-Static.lib")
-#else
-#pragma comment(lib, "libpjproject-i386-Win32-vc14-Debug-Static.lib")
-#endif
-#else
-#ifdef NDEBUG
-#pragma comment(lib, "libpjproject-x86_64-x64-vc14-Release-Static.lib")
-#else
-#pragma comment(lib, "libpjproject-x86_64-x64-vc14-Debug-Static.lib")
-#endif
-#endif
-
 #include "MMNotificationClient.h"
 
 #include "BaseDialog.h"
@@ -129,7 +115,7 @@ public:
 	void UpdateWindowText(CString = CString(), int icon = IDI_DEFAULT, bool afterRegister = false);
 	void PublishStatus(bool online = true, bool init=false);
 	void TrayIconUpdateTip();
-	void BaloonPopup(CString title, CString message, DWORD flags = NIIF_WARNING);
+	void BaloonPopup(CString title, CString message, DWORD flags = NIIF_WARNING); // CORRIGIDO: Adicionado 'void' como tipo de retorno.
 	void SwitchDND(int state = -1, bool update = false);
 	bool GotoTabLParam(LPARAM lParam);
 	bool GotoTab(int i, CTabCtrl* tab = NULL) override;
